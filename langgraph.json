@@ -1,0 +1,24 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": {
+      "path": "main.py:create_agent_graph",
+      "config_schema": {
+        "google_api_key": {
+          "type": "string",
+          "description": "Google API key for Gemini"
+        },
+        "silicon_expert_username": {
+          "type": "string",
+          "description": "Silicon Expert username"
+        },
+        "silicon_expert_api_key": {
+          "type": "string",
+          "description": "Silicon Expert API key"
+        }
+      }
+    }
+  },
+  "env": ".env",
+  "image_distro": "wolfi"
+}
