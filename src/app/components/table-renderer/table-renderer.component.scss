@@ -1,0 +1,122 @@
+/* src/app/components/table-renderer/table-renderer.component.scss */
+.table-container {
+  margin: 1rem 0;
+}
+
+.table-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+
+  .filters {
+    .filter-input {
+      padding: 0.5rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      width: 250px;
+    }
+  }
+
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+
+  th {
+    background: #f8f9fa;
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #dee2e6;
+
+    &.sortable {
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+
+      &:hover {
+        background: #e9ecef;
+      }
+
+      .sort-indicator {
+        margin-left: 0.5rem;
+        color: #007bff;
+      }
+    }
+  }
+
+  td {
+    padding: 0.75rem;
+    border-bottom: 1px solid #dee2e6;
+    vertical-align: top;
+
+    .confidence-bar {
+      position: relative;
+      height: 20px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      overflow: hidden;
+      min-width: 60px;
+
+      .confidence-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+        border-radius: 10px;
+
+        &.confidence-high {
+          background: linear-gradient(90deg, #28a745, #20c997);
+        }
+
+        &.confidence-medium {
+          background: linear-gradient(90deg, #ffc107, #fd7e14);
+        }
+
+        &.confidence-low {
+          background: linear-gradient(90deg, #dc3545, #e83e8c);
+        }
+      }
+
+      .confidence-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 0.75em;
+        font-weight: 600;
+        color: #333;
+      }
+    }
+  }
+
+  tr:hover {
+    background: #f8f9fa;
+  }
+}
+
+.table-summary {
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  font-size: 0.9em;
+  color: #6c757d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}

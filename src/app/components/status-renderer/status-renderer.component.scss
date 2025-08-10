@@ -1,0 +1,40 @@
+/* src/app/components/status-renderer/status-renderer.component.scss */
+.status-container {
+  padding: 1rem 0;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.status-card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+
+  .card-header {
+    background: #f8f9fa;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #dee2e6;
+
+    h4 {
+      margin: 0;
+      font-size: 1em;
+      color: #495057;
+    }
+  }
+
+  .card-content {
+    padding: 1rem;
+  }
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
