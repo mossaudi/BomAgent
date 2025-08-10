@@ -2,13 +2,13 @@
   "dependencies": ["."],
   "graphs": {
     "agent": {
-      "path": "main.py:create_agent_graph",
+      "path": "main:create_agent_graph",
       "config_schema": {
         "google_api_key": {
           "type": "string",
           "description": "Google API key for Gemini"
         },
-        "silicon_expert_username": {
+        "SILICON_EXPERT_USERNAME": {
           "type": "string",
           "description": "Silicon Expert username"
         },

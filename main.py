@@ -1,5 +1,13 @@
-# main_simplified.py - SESSION-AWARE VERSION
+# main.py - SESSION-AWARE VERSION
 """Enhanced LangGraph agent with session-based memory for multi-user support."""
+
+import sys
+from pathlib import Path
+
+# Add src directory to Python path
+project_root = Path(__file__).parent
+src_path = project_root / "src" / "agent"
+sys.path.insert(0, str(src_path))
 
 import getpass
 import json
@@ -361,6 +369,14 @@ class MultiUserBOMService:
         """Clean up inactive user sessions (call periodically)."""
         # Implementation would check session expiry and remove inactive agents
         pass
+
+
+def create_agent_graph(config: dict):
+    """Factory function for LangGraph to create the agent graph."""
+    app_config = AppConfig.from_env()
+
+    agent = IntelligentBOMAgent(app_config)
+    return agent.agent
 
 
 def main():

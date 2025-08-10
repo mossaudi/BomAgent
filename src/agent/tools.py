@@ -8,6 +8,7 @@ from langchain.tools import tool
 from container import Container
 from exceptions import AgentError
 from services.memory import get_memory_manager, get_component_memory
+from src.agent.models import BOMTreeResult
 
 # Global container instance
 _container: Container = None
@@ -334,7 +335,6 @@ def get_boms(project_name: str = "", session_id: str = None, **kwargs) -> str:
         if not bom_result.get("success", False):
             return f"❌ Failed to retrieve BOMs"
 
-        from models import BOMTreeResult
         bom_tree = BOMTreeResult(**bom_result["bom_tree"])
         return _container.formatter.format_bom_tree(bom_tree)
 

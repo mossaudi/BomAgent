@@ -3,6 +3,8 @@
 from collections import Counter
 from typing import List, Dict
 
+from tabulate import tabulate
+
 from src.agent.constants import DEFAULT_BOM_COLUMNS
 from src.agent.models import EnhancedComponent, SearchResult, BOMTreeResult
 from src.agent.services.progress import get_progress_tracker
@@ -63,10 +65,10 @@ class ComponentTableFormatter:
 
         for i, component in enumerate(components, 1):
             # Safe extraction with fallbacks
-            component_name = component.name or f'Component {i}'
-            part_number = component.effective_part_number
-            manufacturer = component.effective_manufacturer
-            description = component.effective_description
+            component_name = component['name'] or f'Component {i}'
+            part_number = component['part_number'] or 'N/A'
+            manufacturer = component['manufacturer'] or 'N/A'
+            description = component['description'] or 'N/A'
 
             # Truncate long descriptions
             if description != 'N/A' and len(description) > 50:
@@ -77,10 +79,10 @@ class ComponentTableFormatter:
             rohs = 'N/A'
             match_rating = 'N/A'
 
-            if component.silicon_expert_data:
-                lifecycle = component.silicon_expert_data.lifecycle or 'N/A'
-                rohs = component.silicon_expert_data.rohs or 'N/A'
-                match_rating = component.silicon_expert_data.match_rating or 'N/A'
+            if component['silicon_expert_data']:
+                lifecycle = component['silicon_expert_data']['lifecycle'] or 'N/A'
+                rohs = component['silicon_expert_data']['rohs'] or 'N/A'
+                match_rating = component['silicon_expert_data']['match_rating'] or 'N/A'
 
             row = {
                 '#': str(i),
@@ -107,9 +109,6 @@ class ComponentTableFormatter:
     def _format_with_tabulate(self, table_data: List[Dict[str, str]]) -> str:
         """Format table using tabulate library (original method)."""
         try:
-            from tabulate import tabulate
-
-            # Ensure all values are strings
             clean_table_data = []
             for row in table_data:
                 clean_row = {
@@ -124,7 +123,6 @@ class ComponentTableFormatter:
                 tablefmt='grid',
                 maxcolwidths=[3, 20, 20, 15, 40, 12, 8, 12]
             )
-
         except Exception as e:
             self.progress.warning("Tabulate Formatting", f"Falling back due to: {str(e)}")
             return self._format_fallback(table_data)
@@ -161,9 +159,9 @@ class ComponentTableFormatter:
         rohs_counts = Counter()
 
         for component in components:
-            if component.silicon_expert_data:
-                lifecycle = component.silicon_expert_data.lifecycle or 'Unknown'
-                rohs = component.silicon_expert_data.rohs or 'Unknown'
+            if component['silicon_expert_data']:
+                lifecycle = component['silicon_expert_data']['lifecycle'] or 'Unknown'
+                rohs = component['silicon_expert_data']['rohs'] or 'Unknown'
             else:
                 lifecycle = 'Unknown'
                 rohs = 'Unknown'

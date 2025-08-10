@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 
 from src.agent.clients.silicon_expert import SiliconExpertClient
 from src.agent.exceptions import BOMError, AgentError
-from src.agent.models import BOMInfo
+from src.agent.models import BOMInfo, BOMTreeResult
 from src.agent.services.progress import get_progress_tracker
 from src.agent.utils.cache import TTLCache, cached_operation
 
@@ -74,7 +74,6 @@ class BOMManagementService:
             )
 
             # Parse into structured format
-            from ..models import BOMTreeResult
             bom_tree = BOMTreeResult.from_api_response(api_result)
 
             if bom_tree.success:
