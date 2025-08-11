@@ -2,23 +2,19 @@
 """Modern LangGraph agent with clean architecture and human-in-the-loop patterns."""
 
 import asyncio
-from typing import Dict, Any, Optional, List, Literal
 from dataclasses import dataclass
 from enum import Enum
+from typing import Dict, Any, Optional, List, Literal
 
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import StateGraph, END
 
-from src.core.config import AppConfig
-from src.core.container import Container
-from src.core.exceptions import AgentError
-from src.models.state import AgentState, UserInteraction, ResponseType
-from src.models.responses import AgentResponse, HumanApprovalRequest
-from src.core.services.agent_service import AgentOrchestrator
+from core.config import AppConfig
+from core.container import Container
+from models.state import AgentState, ResponseType, HumanApprovalRequest, AgentResponse
+from services.agent_service import AgentOrchestrator
 
 
 class WorkflowStep(Enum):
