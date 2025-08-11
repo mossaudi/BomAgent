@@ -4,8 +4,8 @@
 import json
 from typing import List, Dict, Any
 
-from src.agent.models import Component
-from src.agent.exceptions import DataValidationError, JSONProcessingError
+from backend.src.core.exceptions import JSONProcessingError, DataValidationError
+from backend.src.core.models import Component
 
 
 class ParsingService:

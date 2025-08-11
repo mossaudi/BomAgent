@@ -5,10 +5,10 @@ from typing import List, Dict, Any
 
 from langchain.tools import tool
 
+from backend.src.core.models import BOMTreeResult
+from backend.src.services.memory import get_memory_manager, get_component_memory
 from container import Container
 from exceptions import AgentError
-from services.memory import get_memory_manager, get_component_memory
-from src.agent.models import BOMTreeResult
 
 # Global container instance
 _container: Container = None

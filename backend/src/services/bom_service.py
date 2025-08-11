@@ -4,9 +4,9 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from src.clients.silicon_expert import SiliconExpertClient
-from src.models.state import BOMData, ComponentData
-from src.services.memory_service import MemoryService
+from backend.src.clients.silicon_expert_client import SiliconExpertClient
+from backend.src.models.state import BOMData, ComponentData
+from backend.src.services.memory_service import MemoryService
 
 
 class BOMService:

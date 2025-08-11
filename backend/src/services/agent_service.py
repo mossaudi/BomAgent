@@ -1,8 +1,9 @@
 """Service layer for orchestrating agent operations."""
 
 from typing import Dict, Any, List
-from src.core.container import Container
-from src.models.state import ComponentData, BOMData, ResponseBuilder
+
+from backend.src.core.container import Container
+from backend.src.models.state import ComponentData
 
 
 class AgentOrchestrator:

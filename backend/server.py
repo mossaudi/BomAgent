@@ -1,20 +1,18 @@
 # server.py - FastAPI server with human-in-the-loop support
 """FastAPI server for BOM agent with real-time human approval."""
 
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Dict, Any, Optional
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Dict, Any, Optional, List
-import asyncio
-import json
-import uuid
-from datetime import datetime
-from contextlib import asynccontextmanager
 
 from src.core.config import AppConfig
 from src.main import ModernBOMAgent
-from src.models.state import UserInteraction, InteractionType, HumanApprovalRequest
+from src.models.state import HumanApprovalRequest
 
 
 class ChatRequest(BaseModel):

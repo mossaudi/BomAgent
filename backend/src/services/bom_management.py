@@ -5,11 +5,11 @@ import json
 from dataclasses import asdict
 from typing import List, Dict, Any
 
-from src.agent.clients.silicon_expert import SiliconExpertClient
-from src.agent.exceptions import BOMError, AgentError
-from src.agent.models import BOMInfo, BOMTreeResult
-from src.agent.services.progress import get_progress_tracker
-from src.agent.utils.cache import TTLCache, cached_operation
+from backend.src.clients.silicon_expert_client import SiliconExpertClient
+from backend.src.core.exceptions import BOMError, AgentError
+from backend.src.core.models import BOMTreeResult, BOMInfo
+from backend.src.services.progress import get_progress_tracker
+from backend.src.utils.cache import TTLCache, cached_operation
 
 
 class BOMManagementService:

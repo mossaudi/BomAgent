@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import asdict
 
-from src.models.state import ComponentData
+from backend.src.models.state import ComponentData
 
 
 class MemoryService:

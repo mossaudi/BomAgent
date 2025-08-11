@@ -3,11 +3,11 @@
 from dataclasses import asdict
 from typing import List, Optional
 
-from src.agent.clients.silicon_expert import SiliconExpertClient
-from src.agent.models import EnhancedComponent, Component, SearchResult
-from src.agent.services.analysis import ComponentAnalysisService
-from src.agent.services.parsing import ParsingService
-from src.agent.services.progress import get_progress_tracker
+from backend.src.clients.silicon_expert_client import SiliconExpertClient, SearchResult
+from backend.src.core.models import EnhancedComponent, Component
+from backend.src.services.analysis import ComponentAnalysisService
+from backend.src.services.parsing import ParsingService
+from backend.src.services.progress import get_progress_tracker
 
 
 class BOMWorkflowService:

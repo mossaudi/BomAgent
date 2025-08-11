@@ -5,9 +5,10 @@ from typing import List, Dict
 
 from tabulate import tabulate
 
-from src.agent.constants import DEFAULT_BOM_COLUMNS
-from src.agent.models import EnhancedComponent, SearchResult, BOMTreeResult
-from src.agent.services.progress import get_progress_tracker
+from backend.src.clients.silicon_expert_client import SearchResult
+from backend.src.core.constants import DEFAULT_BOM_COLUMNS
+from backend.src.core.models import EnhancedComponent
+from backend.src.services.progress import get_progress_tracker
 
 
 class ComponentTableFormatter:

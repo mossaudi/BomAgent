@@ -9,12 +9,12 @@ from contextlib import asynccontextmanager
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.core.config import AppConfig
-from src.services.memory_service import MemoryService
-from src.services.schematic_service import SchematicService
-from src.services.component_service import ComponentService
-from src.services.bom_service import BOMService
-from src.clients.silicon_expert_client import SiliconExpertClient
+from backend.src.core.config import AppConfig
+from backend.src.services.memory_service import MemoryService
+from backend.src.services.schematic_service import SchematicService
+from backend.src.services.component_service import ComponentService
+from backend.src.services.bom_service import BOMService
+from backend.src.clients.silicon_expert_client import SiliconExpertClient
 
 
 @dataclass

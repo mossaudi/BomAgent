@@ -7,8 +7,8 @@ from langchain_core.messages import HumanMessage
 from langchain.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.agent.exceptions import SchematicAnalysisError
-from src.agent.services.progress import get_progress_tracker
+from backend.src.core.exceptions import SchematicAnalysisError
+from backend.src.services.progress import get_progress_tracker
 
 
 class SchematicAnalyzer:

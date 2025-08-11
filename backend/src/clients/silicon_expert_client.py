@@ -6,7 +6,7 @@ import aiohttp
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
-from src.core.config import SiliconExpertConfig
+from backend.src.core.config import SiliconExpertConfig
 
 
 @dataclass
