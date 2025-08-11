@@ -2,7 +2,6 @@
 """Modern component search and enhancement service."""
 
 from typing import List, Dict, Any
-from dataclasses import asdict
 
 from backend.src.clients.silicon_expert_client import SiliconExpertClient
 from backend.src.models.state import ComponentData

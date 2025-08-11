@@ -1,10 +1,10 @@
 # src/clients/silicon_expert_client.py
 """Modern Silicon Expert client with async support."""
 
-import asyncio
-import aiohttp
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from typing import Dict, Any, List, Optional
+
+import aiohttp
 
 from backend.src.core.config import SiliconExpertConfig
 

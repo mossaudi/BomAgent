@@ -1,10 +1,9 @@
 # src/services/memory_service.py
 """Modern memory service with clean interface."""
 
-import asyncio
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
 from dataclasses import asdict
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 
 from backend.src.models.state import ComponentData
 

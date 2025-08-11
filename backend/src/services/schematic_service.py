@@ -3,8 +3,8 @@
 
 import json
 import re
-from typing import Dict, Any, List
-from langchain_core.messages import HumanMessage
+from typing import Dict, Any
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 

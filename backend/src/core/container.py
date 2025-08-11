@@ -2,19 +2,19 @@
 """Modern dependency injection container with clean architecture."""
 
 from __future__ import annotations
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
-import asyncio
+
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from backend.src.clients.silicon_expert_client import SiliconExpertClient
 from backend.src.core.config import AppConfig
+from backend.src.services.bom_service import BOMService
+from backend.src.services.component_service import ComponentService
 from backend.src.services.memory_service import MemoryService
 from backend.src.services.schematic_service import SchematicService
-from backend.src.services.component_service import ComponentService
-from backend.src.services.bom_service import BOMService
-from backend.src.clients.silicon_expert_client import SiliconExpertClient
 
 
 @dataclass
