@@ -1,0 +1,84 @@
+// src/app/components/tree-renderer/tree-renderer.component.scss
+.tree-container {
+  margin: 1rem 0;
+}
+
+.tree-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+
+  .btn {
+    padding: 0.4rem 0.8rem;
+    border: 1px solid #dee2e6;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    margin-right: 0.5rem;
+
+    &:hover {
+      background: #e9ecef;
+    }
+  }
+
+  .tree-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+}
+
+.tree-structure {
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  background: white;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tree-node {
+  border-bottom: 1px solid #f8f9fa;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  .node-content {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background: #f8f9fa;
+    }
+
+    .node-icon {
+      margin-right: 0.5rem;
+      font-size: 1.1em;
+    }
+
+    .node-name {
+      font-weight: 500;
+      color: #495057;
+    }
+
+    .node-data {
+      margin-left: auto;
+      font-size: 0.8em;
+      color: #6c757d;
+      font-style: italic;
+    }
+  }
+
+  .node-details {
+    padding: 0 2rem 1rem 2rem;
+    background: #f8f9fa;
+    border-top: 1px solid #e9ecef;
+  }
+}

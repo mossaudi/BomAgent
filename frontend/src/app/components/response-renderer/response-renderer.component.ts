@@ -10,7 +10,7 @@ import { AgentResponse, ResponseType, UIRecommendation } from '../../models/chat
       <!-- Error Response -->
       <div *ngIf="response.response_type === 'error'" class="error-response">
         <div class="error-header">
-          <i class="icon-error">❌</i>
+          <i class="icon-error">⚠</i>
           <span>Error</span>
         </div>
         <div class="error-content">{{response.error}}</div>
@@ -31,7 +31,7 @@ import { AgentResponse, ResponseType, UIRecommendation } from '../../models/chat
           <app-table-renderer
             *ngSwitchCase="'table'"
             [data]="response.data"
-            [recommendations]="response.ui_recommendations"
+            [recommendations]="response.ui_recommendations || null"
             (actionClicked)="onActionClick($event)">
           </app-table-renderer>
 
@@ -39,7 +39,7 @@ import { AgentResponse, ResponseType, UIRecommendation } from '../../models/chat
           <app-tree-renderer
             *ngSwitchCase="'tree'"
             [data]="response.data"
-            [recommendations]="response.ui_recommendations"
+            [recommendations]="response.ui_recommendations || null"
             (actionClicked)="onActionClick($event)">
           </app-tree-renderer>
 
@@ -47,7 +47,7 @@ import { AgentResponse, ResponseType, UIRecommendation } from '../../models/chat
           <app-status-renderer
             *ngSwitchCase="'status'"
             [data]="response.data"
-            [recommendations]="response.ui_recommendations"
+            [recommendations]="response.ui_recommendations || null"
             (actionClicked)="onActionClick($event)">
           </app-status-renderer>
 

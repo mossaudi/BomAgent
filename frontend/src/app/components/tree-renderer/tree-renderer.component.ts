@@ -34,7 +34,7 @@ interface TreeNode {
       <div class="tree-structure">
         <div *ngFor="let node of flattenedTree; trackBy: trackByNode"
              class="tree-node"
-             [style.padding-left.px]="node.level * 20">
+             [style.padding-left.px]="(node.level || 0) * 20">
 
           <div class="node-content" (click)="toggleNode(node)">
 
@@ -50,7 +50,7 @@ interface TreeNode {
             <span class="node-name">{{node.name}}</span>
 
             <!-- Node Data -->
-            <span class="node-data" *ngIf="node.data && typeof node.data === 'object'">
+            <span class="node-data" *ngIf="node.data && isObject(node.data)">
               ({{getDataSummary(node.data)}})
             </span>
           </div>
@@ -77,6 +77,11 @@ export class TreeRendererComponent {
     this.buildTree();
   }
 
+  // Helper method for template
+  isObject(value: any): boolean {
+    return typeof value === 'object' && value !== null;
+  }
+
   private buildTree(): void {
     if (!this.data) return;
 
@@ -90,14 +95,14 @@ export class TreeRendererComponent {
         name: `Item ${index + 1}`,
         data: item,
         expanded: false,
-        children: typeof item === 'object' ? this.convertToTree(item, `Item ${index + 1}`) : undefined
+        children: this.isObject(item) ? this.convertToTree(item, `Item ${index + 1}`) : undefined
       }));
-    } else if (typeof data === 'object' && data !== null) {
+    } else if (this.isObject(data)) {
       return Object.keys(data).map(key => ({
         name: key,
         data: data[key],
         expanded: false,
-        children: typeof data[key] === 'object' ? this.convertToTree(data[key], key) : undefined
+        children: this.isObject(data[key]) ? this.convertToTree(data[key], key) : undefined
       }));
     } else {
       return [{
@@ -161,7 +166,7 @@ export class TreeRendererComponent {
   getDataSummary(data: any): string {
     if (Array.isArray(data)) {
       return `${data.length} items`;
-    } else if (typeof data === 'object') {
+    } else if (this.isObject(data)) {
       return `${Object.keys(data).length} properties`;
     } else {
       return typeof data;

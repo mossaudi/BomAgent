@@ -1,9 +1,9 @@
 """Service layer for orchestrating agent operations."""
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
-from backend.src.core.container import Container
-from backend.src.models.state import ComponentData
+from src.core.container import Container
+from src.models.state import ComponentData
 
 
 class AgentOrchestrator:
@@ -166,3 +166,25 @@ class AgentOrchestrator:
                 "session_id": self.container.session_id
             }
 
+    async def get_boms(self, project_filter: Optional[str] = None) -> Dict[str, Any]:
+        """Orchestrate getting BOMs workflow."""
+        try:
+            await self.container.initialize()
+
+            bom_service = self.container.get_bom_service()
+            result = await bom_service.get_boms(project_filter)
+
+            return {
+                "success": True,
+                "boms": result.get("boms", []),
+                "projects": result.get("projects", []),
+                "total_count": result.get("total_count", 0),
+                "message": f"Retrieved {result.get('total_count', 0)} BOMs"
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "boms": []
+            }

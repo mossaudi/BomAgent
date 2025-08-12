@@ -1,0 +1,70 @@
+// src/app/components/json-renderer/json-renderer.component.scss
+.json-container {
+  margin: 1rem 0;
+
+  &.compact {
+    margin: 0.5rem 0;
+  }
+}
+
+.json-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.9em;
+  color: #666;
+
+  .btn {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid #ddd;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+
+    &:hover {
+      background: #f8f9fa;
+    }
+  }
+}
+
+.json-content {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 1rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.85em;
+  line-height: 1.4;
+  overflow-x: auto;
+  max-height: 200px;
+
+  &.expanded {
+    max-height: none;
+  }
+
+  // JSON syntax highlighting
+  .json-key {
+    color: #0451a5;
+    font-weight: 600;
+  }
+
+  .json-string {
+    color: #098658;
+  }
+
+  .json-number {
+    color: #098658;
+  }
+
+  .json-boolean {
+    color: #0000ff;
+    font-weight: 600;
+  }
+
+  .json-null {
+    color: #808080;
+    font-style: italic;
+  }
+}

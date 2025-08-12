@@ -3,12 +3,13 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { ChatMessage, AgentResponse, HumanApprovalRequest } from '../models/chat.models';
+import { environment } from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ChatService {
-  private readonly apiUrl = 'http://localhost:8000/api';
+  private readonly apiUrl = environment.apiUrl;
   private messagesSubject = new BehaviorSubject<ChatMessage[]>([]);
   private pendingApprovalSubject = new Subject<HumanApprovalRequest>();
 

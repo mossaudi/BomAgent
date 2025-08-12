@@ -1,5 +1,5 @@
 // src/app/components/approval-panel/approval-panel.component.ts
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy } from '@angular/core';
 import { FormControl } from '@angular/forms';
 import { HumanApprovalRequest } from '../../models/chat.models';
 
@@ -8,7 +8,7 @@ import { HumanApprovalRequest } from '../../models/chat.models';
   template: `
     <div class="approval-panel" *ngIf="approvalRequest">
       <div class="approval-header">
-        <h4>🤝 Human Approval Required</h4>
+        <h4>🤖 Human Approval Required</h4>
         <span class="approval-step">Step: {{approvalRequest.step}}</span>
       </div>
 
@@ -34,6 +34,16 @@ import { HumanApprovalRequest } from '../../models/chat.models';
         <!-- Actions -->
         <div class="approval-actions">
           <button
+            class="btn btn-success"
+            (click)="approve()">
+            ✅ Approve
+          </button>
+          <button
+            class="btn btn-danger"
+            (click)="reject()">
+            ❌ Reject
+          </button>
+          <button
             class="btn btn-secondary"
             (click)="modify()">
             ✏️ Modify
@@ -49,7 +59,7 @@ import { HumanApprovalRequest } from '../../models/chat.models';
   `,
   styleUrls: ['./approval-panel.component.scss']
 })
-export class ApprovalPanelComponent {
+export class ApprovalPanelComponent implements OnInit, OnDestroy {
   @Input() approvalRequest: HumanApprovalRequest | null = null;
   @Output() approved = new EventEmitter<HumanApprovalRequest>();
   @Output() rejected = new EventEmitter<HumanApprovalRequest>();
