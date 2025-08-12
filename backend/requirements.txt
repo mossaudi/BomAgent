@@ -1,0 +1,21 @@
+# ================================================================================================
+# requirements.txt - Simplified Dependencies
+# ================================================================================================
+
+# Core dependencies for simplified BOM agent
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-dotenv==1.0.0
+
+# LangChain and AI
+langchain==0.0.350
+langchain-google-genai==0.0.6
+
+# HTTP client
+aiohttp==3.9.1
+
+# Development and testing
+pytest==7.4.3
+pytest-asyncio==0.23.2
+black==23.11.0

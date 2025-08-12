@@ -4,7 +4,8 @@
 from typing import List, Dict, Any
 
 from src.clients.silicon_expert_client import SiliconExpertClient
-from src.models.state import ComponentData
+
+from main import ComponentData
 from src.services.memory_service import MemoryService
 
 

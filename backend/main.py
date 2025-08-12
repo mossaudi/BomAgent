@@ -1,1017 +1,881 @@
-# main.py - MODERN LANGGRAPH AGENT
-"""Modern LangGraph agent with clean architecture and human-in-the-loop patterns."""
+# main.py - Simplified React-based BOM Agent
+"""
+Clean, maintainable BOM Agent using React pattern.
+Designed for Angular chat UI integration via REST API.
+"""
 
-from dataclasses import dataclass
+import asyncio
+import uuid
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, asdict
+from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
 
-from langchain_core.messages import HumanMessage
-from langchain_core.prompts import ChatPromptTemplate
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import StateGraph, END
-
-from src.core.config import AppConfig
-from src.core.container import Container
-from src.models.state import AgentState, ResponseType, HumanApprovalRequest, AgentResponse
-from src.models.state import UIRecommendation
-from src.services.agent_service import AgentOrchestrator
+from langchain.agents import Tool, initialize_agent, AgentType
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
-class WorkflowStep(Enum):
-    """Workflow step enumeration."""
-    ANALYZE_SCHEMATIC = "analyze_schematic"
-    SEARCH_COMPONENTS = "search_components"
-    CREATE_BOM = "create_bom"
-    ADD_PARTS = "add_parts"
-    HUMAN_APPROVAL = "human_approval"
+# ================================================================================================
+# CORE MODELS & TYPES
+# ================================================================================================
+
+class ResponseType(Enum):
+    """UI response types for Angular frontend"""
+    SUCCESS = "success"
+    ERROR = "error"
+    TABLE = "table"
+    CONFIRMATION = "confirmation"
+    PROGRESS = "progress"
+    TREE = "tree"
 
 
 @dataclass
-class IntentResult:
-    """Intent classification result."""
-    intent: str
-    confidence: float
-    parameters: Dict[str, Any]
-    is_valid: bool = True
-    error_message: Optional[str] = None
+class AgentResponse:
+    """Standardized response for Angular UI"""
+    id: str
+    success: bool
+    type: ResponseType
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    suggestions: List[str] = None
+    timestamp: str = None
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
+        if self.suggestions is None:
+            self.suggestions = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
-class HumanApprovalConfig:
-    """Configuration for human approval requirements."""
-    require_analysis_approval: bool = True
-    require_bom_creation_approval: bool = True
-    require_parts_addition_approval: bool = True
-    auto_approve_threshold: Optional[float] = 0.95
+class ComponentData:
+    """Simplified component data structure"""
+    name: str
+    part_number: Optional[str] = None
+    manufacturer: Optional[str] = None
+    description: Optional[str] = None
+    quantity: int = 1
+    confidence: float = 0.0
 
 
-class ModernBOMAgent:
-    """Fixed LangGraph agent with proper routing and error handling."""
+# ================================================================================================
+# ABSTRACT SERVICE INTERFACES
+# ================================================================================================
 
-    def __init__(self, config: AppConfig, session_id: Optional[str] = None):
-        self.config = config
-        self.container = Container(config, session_id)
-        self.orchestrator = AgentOrchestrator(self.container)
-        self.approval_config = HumanApprovalConfig()
-        self.graph = self._build_graph()
+class ServiceInterface(ABC):
+    """Base interface for all services"""
 
-    def _build_graph(self) -> StateGraph:
-        """Build the corrected LangGraph workflow with BOM listing."""
-        workflow = StateGraph(AgentState)
+    @abstractmethod
+    async def initialize(self) -> None:
+        pass
 
-        # Add all nodes including new BOM listing nodes
-        workflow.add_node("router", self._route_request)
-        workflow.add_node("validate_schematic_input", self._validate_schematic_input)
-        workflow.add_node("validate_search_input", self._validate_search_input)
-        workflow.add_node("validate_bom_input", self._validate_bom_input)
-        workflow.add_node("validate_parts_input", self._validate_parts_input)
-        workflow.add_node("validate_bom_list_input", self._validate_bom_list_input)  # New
-        workflow.add_node("analyze_schematic", self._analyze_schematic)
-        workflow.add_node("search_components", self._search_components)
-        workflow.add_node("create_bom", self._create_bom)
-        workflow.add_node("add_parts", self._add_parts)
-        workflow.add_node("list_boms", self._list_boms)  # New
-        workflow.add_node("human_approval", self._request_human_approval)
-        workflow.add_node("handle_error", self._handle_error)
-        workflow.add_node("handle_retry", self._handle_retry)
-        workflow.add_node("format_response", self._format_response)
+    @abstractmethod
+    async def cleanup(self) -> None:
+        pass
 
-        # Fixed conditional routing from router
-        workflow.add_conditional_edges(
-            "router",
-            self._route_based_on_intent,
-            {
-                "validate_schematic_input": "validate_schematic_input",
-                "validate_search_input": "validate_search_input",
-                "validate_bom_input": "validate_bom_input",
-                "validate_parts_input": "validate_parts_input",
-                "validate_bom_list_input": "validate_bom_list_input",  # New
-                "handle_error": "handle_error"
-            }
-        )
 
-        # Validation edges (add new BOM list validation)
-        workflow.add_conditional_edges(
-            "validate_schematic_input",
-            self._check_validation_result,
-            {"valid": "analyze_schematic", "invalid": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "validate_search_input",
-            self._check_validation_result,
-            {"valid": "search_components", "invalid": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "validate_bom_input",
-            self._check_validation_result,
-            {"valid": "create_bom", "invalid": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "validate_parts_input",
-            self._check_validation_result,
-            {"valid": "add_parts", "invalid": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "validate_bom_list_input",
-            self._check_validation_result,
-            {"valid": "list_boms", "invalid": "handle_error"}
-        )
+class SchematicServiceInterface(ServiceInterface):
+    @abstractmethod
+    async def analyze_schematic(self, image_url: str) -> Dict[str, Any]:
+        pass
 
-        # Operation to approval/response edges
-        workflow.add_conditional_edges(
-            "analyze_schematic",
-            self._needs_approval,
-            {"approval": "human_approval", "continue": "format_response", "error": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "search_components",
-            self._needs_approval,
-            {"approval": "human_approval", "continue": "format_response", "error": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "create_bom",
-            self._needs_approval,
-            {"approval": "human_approval", "continue": "format_response", "error": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "add_parts",
-            self._needs_approval,
-            {"approval": "human_approval", "continue": "format_response", "error": "handle_error"}
-        )
-        workflow.add_conditional_edges(
-            "list_boms",
-            self._needs_approval,
-            {"approval": "human_approval", "continue": "format_response", "error": "handle_error"}
-        )
 
-        # Approval handling
-        workflow.add_conditional_edges(
-            "human_approval",
-            self._handle_approval_result,
-            {
-                "approved": "format_response",
-                "rejected": "handle_error",
-                "retry": "handle_retry",
-                "timeout": "handle_error"
-            }
-        )
+class ComponentServiceInterface(ServiceInterface):
+    @abstractmethod
+    async def search_components(self, query: str) -> Dict[str, Any]:
+        pass
 
-        # Error handling
-        workflow.add_conditional_edges(
-            "handle_error",
-            self._should_retry,
-            {"retry": "handle_retry", "final": "format_response"}
-        )
 
-        workflow.add_edge("handle_retry", "router")
-        workflow.add_edge("format_response", END)
+class BOMServiceInterface(ServiceInterface):
+    @abstractmethod
+    async def create_bom(self, name: str, project: str = "", description: str = "") -> Dict[str, Any]:
+        pass
 
-        workflow.set_entry_point("router")
+    @abstractmethod
+    async def add_parts_to_bom(self, bom_name: str, parts: List[ComponentData]) -> Dict[str, Any]:
+        pass
 
-        return workflow.compile(
-            checkpointer=MemorySaver(),
-            interrupt_before=["human_approval"]
-        )
+    @abstractmethod
+    async def list_boms(self, project_filter: str = "") -> Dict[str, Any]:
+        pass
 
-    async def _route_request(self, state: AgentState) -> AgentState:
-        """Enhanced request routing with proper state access and null safety."""
-        # Fix: Access state as dictionary, not object attributes
-        messages = state.get("messages", [])
-        user_input = ""
 
-        if messages:
-            last_message = messages[-1]
-            user_input = getattr(last_message, 'content', '') or ""
+# ================================================================================================
+# SIMPLIFIED SERVICE IMPLEMENTATIONS
+# ================================================================================================
 
-        # Ensure user_input is a string
-        if not isinstance(user_input, str):
-            user_input = str(user_input) if user_input is not None else ""
+class SchematicService(SchematicServiceInterface):
+    """Wrapper for existing schematic service"""
+
+    def __init__(self, llm: ChatGoogleGenerativeAI):
+        self.llm = llm
+        self._initialized = False
+        self._original_service = None
+
+    async def initialize(self) -> None:
+        if not self._initialized:
+            from src.services.schematic_service import SchematicService as OriginalService
+            self._original_service = OriginalService(self.llm)
+            self._initialized = True
+
+    async def cleanup(self) -> None:
+        self._initialized = False
+        self._original_service = None
+
+    async def analyze_schematic(self, image_url: str) -> Dict[str, Any]:
+        """Analyze schematic and return standardized result"""
+        if not self._initialized:
+            await self.initialize()
 
         try:
-            intent_result = await self._classify_intent_with_params(user_input)
-
-            # Update state dictionary properly
-            state["next_step"] = intent_result.intent
-            state["extracted_params"] = intent_result.parameters
-            state["confidence"] = intent_result.confidence
-            state["validation_result"] = intent_result
-
-            if not intent_result.is_valid:
-                state["error"] = intent_result.error_message or "Intent classification failed"
-
-        except Exception as e:
-            error_msg = f"Intent classification failed: {str(e)}"
-            state["error"] = error_msg
-            state["next_step"] = "error"
-            print(f"Route request error: {error_msg}")
-
-        return state
-
-    def _route_based_on_intent(self, state: AgentState) -> str:
-        """Route based on classified intent with proper state access and null safety."""
-        if state.get("error"):
-            return "handle_error"
-
-        intent = state.get("next_step", "").lower() if state.get("next_step") else "unknown"
-
-        if intent in ["analyze_schematic", "analyze", "schematic"]:
-            return "validate_schematic_input"
-        elif intent in ["search_components", "search", "find"]:
-            return "validate_search_input"
-        elif intent in ["create_bom", "new_bom", "bom"]:
-            return "validate_bom_input"
-        elif intent in ["add_parts", "add", "parts"]:
-            return "validate_parts_input"
-        elif intent in ["show_boms", "list_boms", "get_boms", "show", "list"]:
-            return "validate_bom_list_input"
-        else:
-            return "handle_error"
-
-    def _check_validation_result(self, state: AgentState) -> str:
-        """Check validation result with null safety."""
-        validation_status = state.get("validation_status")
-        return "valid" if validation_status == "valid" else "invalid"
-
-    def _needs_approval(self, state: AgentState) -> str:
-        """Check if step needs human approval with proper error handling."""
-        if state.get("error"):
-            return "error"
-        elif state.get("requires_approval"):
-            return "approval"
-        else:
-            return "continue"
-
-    def _handle_approval_result(self, state: AgentState) -> str:
-        """Handle human approval response with null safety."""
-        approval_status = state.get("human_approval")
-
-        if approval_status == "approved":
-            return "approved"
-        elif approval_status == "rejected":
-            return "rejected"
-        elif approval_status == "retry":
-            return "retry"
-        else:
-            return "timeout"
-
-    def _should_retry(self, state: AgentState) -> str:
-        """Determine if operation should be retried with null safety."""
-        return "retry" if state.get("should_retry") else "final"
-
-    async def _validate_schematic_input(self, state: AgentState) -> AgentState:
-        """Validate schematic analysis input with null safety."""
-        params = state.get("extracted_params") or {}
-
-        image_url = params.get("image_url")
-        if not image_url:
-            # Try to extract from user message
-            user_input = ""
-            messages = state.get("messages", [])
-            if messages:
-                last_message = messages[-1]
-                user_input = getattr(last_message, 'content', '') or ""
-
-            if "http" in user_input:
-                # Basic URL extraction
-                import re
-                urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
-                                  user_input)
-                if urls:
-                    image_url = urls[0]
-
-        if image_url:
-            state["current_request"] = {"image_url": image_url}
-            state["validation_status"] = "valid"
-        else:
-            state["validation_status"] = "invalid"
-            state["error"] = "No image URL found for schematic analysis. Please provide a schematic image URL."
-
-        return state
-
-    async def _validate_search_input(self, state: AgentState) -> AgentState:
-        """Validate component search input with null safety."""
-        params = state.get("extracted_params") or {}
-
-        if params.get("components") or params.get("search_terms"):
-            state["current_request"] = params
-            state["validation_status"] = "valid"
-        else:
-            # Try to use the full user input as search terms
-            messages = state.get("messages", [])
-            user_input = ""
-            if messages:
-                last_message = messages[-1]
-                user_input = getattr(last_message, 'content', '') or ""
-
-            if user_input:
-                state["current_request"] = {"search_terms": user_input}
-                state["validation_status"] = "valid"
-            else:
-                state["validation_status"] = "invalid"
-                state["error"] = "No component search terms provided. Please specify what components to search for."
-
-        return state
-
-    async def _validate_bom_input(self, state: AgentState) -> AgentState:
-        """Validate BOM creation input with null safety."""
-        params = state.get("extracted_params") or {}
-
-        bom_name = params.get("bom_name") or params.get("name")
-        if bom_name and bom_name.strip():
-            state["current_request"] = {
-                "name": bom_name.strip(),
-                "project": params.get("project", "").strip(),
-                "description": params.get("description", "").strip()
-            }
-            state["validation_status"] = "valid"
-        else:
-            state["validation_status"] = "invalid"
-            state["error"] = "BOM name is required for creation. Please specify a name for your BOM."
-
-        return state
-
-    async def _validate_parts_input(self, state: AgentState) -> AgentState:
-        """Validate parts addition input with null safety."""
-        params = state.get("extracted_params") or {}
-
-        bom_name = params.get("bom_name")
-        if bom_name and bom_name.strip():
-            state["current_request"] = {
-                "bom_name": bom_name.strip(),
-                "project": params.get("project", "").strip(),
-                "parts": params.get("parts", [])
-            }
-            state["validation_status"] = "valid"
-        else:
-            state["validation_status"] = "invalid"
-            state["error"] = "BOM name is required for adding parts. Please specify which BOM to add parts to."
-
-        return state
-
-    async def _validate_bom_list_input(self, state: AgentState) -> AgentState:
-        """Validate BOM listing input."""
-        # For listing BOMs, we don't need specific parameters
-        state["current_request"] = {"action": "list_boms"}
-        state["validation_status"] = "valid"
-        return state
-
-    async def _list_boms(self, state: AgentState) -> AgentState:
-        """List existing BOMs with comprehensive error handling."""
-        try:
-            # Ensure container is initialized
-            if not hasattr(self, 'container') or not self.container._initialized:
-                await self.container.initialize()
-
-            result = await self.orchestrator.get_boms()
-
-            if result and result.get("success"):
-                state["step_result"] = result
-                state["requires_approval"] = False  # No approval needed for listing
-                # Clear any previous errors
-                state["error"] = None
-            else:
-                error_msg = result.get("error", "Failed to retrieve BOMs") if result else "No response from BOM service"
-                state["error"] = error_msg
-
-        except Exception as e:
-            error_msg = f"BOM listing error: {str(e)}"
-            state["error"] = error_msg
-            print(f"List BOMs error: {error_msg}")
-
-        return state
-
-    async def _analyze_schematic(self, state: AgentState) -> AgentState:
-        """Analyze schematic with comprehensive error handling."""
-        try:
-            current_request = state.get("current_request") or {}
-            image_url = current_request.get("image_url")
-
-            if not image_url:
-                state["error"] = "No image URL provided for schematic analysis"
-                return state
-
-            # Ensure container is initialized
-            if not hasattr(self, 'container') or not self.container._initialized:
-                await self.container.initialize()
-
-            result = await self.orchestrator.analyze_schematic(image_url)
-
-            if result and result.get("success"):
-                state["step_result"] = result
-                state["requires_approval"] = self.approval_config.require_analysis_approval
-
-                if state["requires_approval"]:
-                    approval_request = HumanApprovalRequest(
-                        step="analyze_schematic",
-                        message=f"Found {len(result.get('components', []))} components. Proceed with analysis?",
-                        data=result,
-                        auto_approve=self._should_auto_approve(result)
-                    )
-                    state["pending_approval"] = approval_request
-                    state["requires_approval"] = not approval_request.auto_approve
-
-                # Clear any previous errors
-                state["error"] = None
-            else:
-                error_msg = result.get("error",
-                                       "Schematic analysis failed") if result else "No response from schematic service"
-                state["error"] = error_msg
-
-        except Exception as e:
-            error_msg = f"Schematic analysis error: {str(e)}"
-            state["error"] = error_msg
-            print(f"Analyze schematic error: {error_msg}")
-
-        return state
-
-    async def _search_components(self, state: AgentState) -> AgentState:
-        """Search components with comprehensive error handling."""
-        try:
-            current_request = state.get("current_request") or {}
-            components = current_request.get("components", [])
-            search_terms = current_request.get("search_terms", "")
-
-            if not components and not search_terms:
-                state["error"] = "No components or search terms provided"
-                return state
-
-            # Ensure container is initialized
-            if not hasattr(self, 'container') or not self.container._initialized:
-                await self.container.initialize()
-
-            # Convert search terms to components format if needed
-            if search_terms and not components:
-                components = [{"name": search_terms, "description": search_terms}]
-
-            result = await self.orchestrator.search_components(components)
-
-            if result and result.get("success"):
-                state["step_result"] = result
-                state["requires_approval"] = False  # Component search doesn't need approval
-                # Clear any previous errors
-                state["error"] = None
-            else:
-                error_msg = result.get("error",
-                                       "Component search failed") if result else "No response from component service"
-                state["error"] = error_msg
-
-        except Exception as e:
-            error_msg = f"Component search error: {str(e)}"
-            state["error"] = error_msg
-            print(f"Search components error: {error_msg}")
-
-        return state
-
-    async def _create_bom(self, state: AgentState) -> AgentState:
-        """Create BOM with comprehensive error handling."""
-        try:
-            bom_data = state.get("current_request") or {}
-            bom_name = bom_data.get("name", "").strip()
-
-            if not bom_name:
-                state["error"] = "BOM name is required for creation"
-                return state
-
-            # Ensure container is initialized
-            if not hasattr(self, 'container') or not self.container._initialized:
-                await self.container.initialize()
-
-            result = await self.orchestrator.create_bom(bom_data)
-
-            if result and result.get("success"):
-                state["step_result"] = result
-                state["requires_approval"] = self.approval_config.require_bom_creation_approval
-
-                if state["requires_approval"]:
-                    approval_request = HumanApprovalRequest(
-                        step="create_bom",
-                        message=f"Create BOM '{bom_name}'?",
-                        data=result,
-                        auto_approve=False
-                    )
-                    state["pending_approval"] = approval_request
-
-                # Clear any previous errors
-                state["error"] = None
-            else:
-                error_msg = result.get("error", "BOM creation failed") if result else "No response from BOM service"
-                state["error"] = error_msg
-
-        except Exception as e:
-            error_msg = f"BOM creation error: {str(e)}"
-            state["error"] = error_msg
-            print(f"Create BOM error: {error_msg}")
-
-        return state
-
-    async def _add_parts(self, state: AgentState) -> AgentState:
-        """Add parts with comprehensive error handling."""
-        try:
-            parts_data = state.get("current_request") or {}
-            bom_name = parts_data.get("bom_name", "").strip()
-
-            if not bom_name:
-                state["error"] = "BOM name is required for adding parts"
-                return state
-
-            # Ensure container is initialized
-            if not hasattr(self, 'container') or not self.container._initialized:
-                await self.container.initialize()
-
-            result = await self.orchestrator.add_parts_to_bom(parts_data)
-
-            if result and result.get("success"):
-                state["step_result"] = result
-                state["requires_approval"] = self.approval_config.require_parts_addition_approval
-
-                if state["requires_approval"]:
-                    parts_count = len(parts_data.get('parts', []))
-                    approval_request = HumanApprovalRequest(
-                        step="add_parts",
-                        message=f"Add {parts_count} parts to BOM '{bom_name}'?",
-                        data=result,
-                        auto_approve=self._should_auto_approve_parts(parts_data)
-                    )
-                    state["pending_approval"] = approval_request
-                    state["requires_approval"] = not approval_request.auto_approve
-
-                # Clear any previous errors
-                state["error"] = None
-            else:
-                error_msg = result.get("error", "Adding parts failed") if result else "No response from BOM service"
-                state["error"] = error_msg
-
-        except Exception as e:
-            error_msg = f"Add parts error: {str(e)}"
-            state["error"] = error_msg
-            print(f"Add parts error: {error_msg}")
-
-        return state
-
-    async def _handle_retry(self, state: AgentState) -> AgentState:
-        """Handle retry logic with proper cleanup."""
-        # Clear error state for retry
-        state["error"] = None
-        state["step_result"] = None
-        state["requires_approval"] = False
-        state["pending_approval"] = None
-
-        # Reset validation status
-        state["validation_status"] = None
-
-        print(f"Retrying operation (attempt {state.get('retry_count', 0) + 1})")
-
-        return state
-
-    async def _classify_intent_with_params(self, user_input: str) -> IntentResult:
-        """Enhanced intent classification with parameter extraction and robust error handling."""
-
-        # First, try rule-based classification for simple cases to avoid LLM calls
-        if self._is_simple_request(user_input):
-            return self._fallback_intent_classification(user_input)
-
-        classification_prompt = ChatPromptTemplate.from_messages([
-            ("system", """Analyze the user's request and extract their intent and parameters.
-
-    IMPORTANT: Return ONLY valid JSON in this exact format:
-    {
-        "intent": "one_of_the_valid_intents",
-        "parameters": {},
-        "confidence": 0.9
-    }
-
-    Valid intents:
-    - "analyze_schematic": For analyzing circuit schematics (look for image URLs, mentions of schematics)
-    - "search_components": For searching electronic components (look for component names, part numbers)
-    - "create_bom": For creating new BOMs (look for "create", "new BOM", BOM names)
-    - "add_parts": For adding parts to existing BOMs (look for "add to", "add parts", existing BOM names)
-    - "show_boms": For listing/showing existing BOMs (look for "show", "list", "get BOMs")
-    - "unknown": For unclear requests
-
-    For each intent, extract relevant parameters:
-    - analyze_schematic: {"image_url": "url_if_found"}
-    - search_components: {"components": ["component1", "component2"], "search_terms": "search query"}
-    - create_bom: {"bom_name": "name", "project": "project", "description": "desc"}
-    - add_parts: {"bom_name": "name", "project": "project"}
-    - show_boms: {} (no parameters needed)
-
-    Examples:
-    User: "Analyze this schematic: https://example.com/image.jpg"
-    Response: {"intent": "analyze_schematic", "parameters": {"image_url": "https://example.com/image.jpg"}, "confidence": 0.95}
-
-    User: "Create a new BOM called PowerSupply for Arduino project"
-    Response: {"intent": "create_bom", "parameters": {"bom_name": "PowerSupply", "project": "Arduino"}, "confidence": 0.9}
-
-    User: "Show me all my BOMs"
-    Response: {"intent": "show_boms", "parameters": {}, "confidence": 0.95}
-    """),
-            ("user", "{input}")
-        ])
-
-        response = None  # Initialize response variable
-        try:
-            # Ensure container is initialized
-            if not self.container._initialized:
-                await self.container.initialize()
-
-            llm = self.container.get_llm()
-            response = await llm.ainvoke(
-                classification_prompt.format_messages(input=user_input)
-            )
-
-            content = response.content.strip()
-
-            # More robust JSON extraction
-            import json
-            import re
-
-            # Try to find JSON in the response
-            json_patterns = [
-                r'\{[^}]*"intent"[^}]*\}',  # Look for JSON with "intent" key
-                r'\{.*?\}',  # Any JSON-like structure
+            result = await self._original_service.analyze(image_url)
+            components = result.get("components", [])
+
+            # Store components in session memory for later use
+            self._last_components = [
+                ComponentData(
+                    name=c.get('name', 'Unknown'),
+                    part_number=c.get('part_number'),
+                    manufacturer=c.get('manufacturer'),
+                    description=c.get('description', ''),
+                    confidence=c.get('confidence', 0.0)
+                ) for c in components
             ]
 
-            parsed_data = None
-            for pattern in json_patterns:
-                matches = re.findall(pattern, content, re.DOTALL)
-                for match in matches:
-                    try:
-                        parsed_data = json.loads(match)
-                        if "intent" in parsed_data:  # Valid structure found
-                            break
-                    except json.JSONDecodeError:
-                        continue
-                if parsed_data and "intent" in parsed_data:
-                    break
-
-            if not parsed_data or "intent" not in parsed_data:
-                # Fallback: Try to parse the entire content
-                try:
-                    parsed_data = json.loads(content)
-                except json.JSONDecodeError:
-                    # Last resort: Rule-based classification
-                    return self._fallback_intent_classification(user_input)
-
-            # Validate and clean the parsed data
-            intent = parsed_data.get("intent", "unknown").lower().strip()
-            parameters = parsed_data.get("parameters", {})
-            confidence = float(parsed_data.get("confidence", 0.5))
-
-            # Map alternative intent names to standard ones
-            intent_mapping = {
-                "analyze": "analyze_schematic",
-                "schematic": "analyze_schematic",
-                "search": "search_components",
-                "find": "search_components",
-                "components": "search_components",
-                "create": "create_bom",
-                "new_bom": "create_bom",
-                "bom": "create_bom",
-                "add": "add_parts",
-                "parts": "add_parts",
-                "show": "show_boms",
-                "list": "show_boms",
-                "get_boms": "show_boms",
-                "list_boms": "show_boms"
+            return {
+                "success": True,
+                "components": components,
+                "total_found": len(components),
+                "confidence": sum(c.get("confidence", 0) for c in components) / max(1, len(components)),
+                "image_url": image_url
             }
 
-            intent = intent_mapping.get(intent, intent)
-
-            # Validate intent
-            valid_intents = ["analyze_schematic", "search_components", "create_bom", "add_parts", "show_boms",
-                             "unknown"]
-            if intent not in valid_intents:
-                intent = "unknown"
-                confidence = 0.3
-
-            return IntentResult(
-                intent=intent,
-                confidence=min(1.0, max(0.0, confidence)),  # Clamp between 0 and 1
-                parameters=parameters if isinstance(parameters, dict) else {},
-                is_valid=True
-            )
-
         except Exception as e:
-            print(f"Intent classification error: {str(e)}")
-            if response:
-                print(f"LLM response content: {getattr(response, 'content', 'No response')[:200]}...")
+            return {
+                "success": False,
+                "error": f"Schematic analysis failed: {str(e)}",
+                "components": []
+            }
+
+    def get_last_components(self) -> List[ComponentData]:
+        """Get components from last analysis"""
+        return getattr(self, '_last_components', [])
+
+
+class ComponentService(ComponentServiceInterface):
+    """Wrapper for existing component service"""
+
+    def __init__(self, silicon_expert_client, memory_service):
+        self.client = silicon_expert_client
+        self.memory = memory_service
+        self._initialized = False
+        self._original_service = None
+
+    async def initialize(self) -> None:
+        if not self._initialized:
+            from src.services.component_service import ComponentService as OriginalService
+            self._original_service = OriginalService(self.client, self.memory)
+            self._initialized = True
+
+    async def cleanup(self) -> None:
+        self._initialized = False
+        self._original_service = None
+
+    async def search_components(self, query: str) -> Dict[str, Any]:
+        """Search for components using existing service"""
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            # Convert query to component search format
+            components = [{"name": query, "description": query}]
+            enhanced = await self._original_service.search_and_enhance(components)
+
+            if enhanced:
+                comp = enhanced[0]
+                return {
+                    "success": True,
+                    "components": [{
+                        "name": comp.name,
+                        "part_number": comp.part_number,
+                        "manufacturer": comp.manufacturer,
+                        "description": comp.description,
+                        "confidence": comp.confidence
+                    }],
+                    "query": query
+                }
             else:
-                print("No LLM response received - likely container initialization issue")
+                return {
+                    "success": False,
+                    "error": f"No components found for: {query}",
+                    "components": []
+                }
 
-            # Fallback to rule-based classification
-            return self._fallback_intent_classification(user_input)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Component search failed: {str(e)}",
+                "components": []
+            }
 
-    def _is_simple_request(self, user_input: str) -> bool:
-        """Check if this is a simple request that can be handled without LLM."""
-        user_input_lower = user_input.lower().strip()
 
-        simple_patterns = [
-            "show me all my boms",
-            "list boms",
-            "get boms",
-            "show boms",
-            "list all boms",
-            "display boms"
+class BOMService(BOMServiceInterface):
+    """Wrapper for existing BOM service"""
+
+    def __init__(self, silicon_expert_client, memory_service):
+        self.client = silicon_expert_client
+        self.memory = memory_service
+        self._initialized = False
+        self._original_service = None
+
+    async def initialize(self) -> None:
+        if not self._initialized:
+            from src.services.bom_service import BOMService as OriginalService
+            self._original_service = OriginalService(self.client, self.memory)
+            self._initialized = True
+
+    async def cleanup(self) -> None:
+        self._initialized = False
+        self._original_service = None
+
+    async def create_bom(self, name: str, project: str = "", description: str = "") -> Dict[str, Any]:
+        """Create new BOM using existing service"""
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            result = await self._original_service.create_bom(name, description, project)
+
+            return {
+                "success": result.get("success", False),
+                "bom_name": name,
+                "project": project,
+                "message": f"BOM '{name}' created successfully" if result.get("success") else result.get("error",
+                                                                                                         "Failed to create BOM")
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"BOM creation failed: {str(e)}"
+            }
+
+    async def add_parts_to_bom(self, bom_name: str, parts: List[ComponentData]) -> Dict[str, Any]:
+        """Add parts to existing BOM"""
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            # Convert ComponentData to API format
+            api_parts = []
+            for part in parts:
+                api_parts.append({
+                    "part_number": part.part_number or "Unknown",
+                    "manufacturer": part.manufacturer or "Unknown",
+                    "description": part.description or part.name,
+                    "quantity": part.quantity,
+                    "designator": ""
+                })
+
+            parts_data = {
+                "bom_name": bom_name,
+                "project": "",
+                "parts": api_parts
+            }
+
+            result = await self._original_service.add_parts(bom_name, "", api_parts)
+
+            return {
+                "success": result.get("success", False),
+                "bom_name": bom_name,
+                "parts_added": len(parts),
+                "message": f"Added {len(parts)} parts to BOM '{bom_name}'" if result.get("success") else result.get(
+                    "error", "Failed to add parts")
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to add parts: {str(e)}"
+            }
+
+    async def list_boms(self, project_filter: str = "") -> Dict[str, Any]:
+        """List existing BOMs"""
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            result = await self._original_service.get_boms(project_filter)
+
+            return {
+                "success": result.get("success", False),
+                "boms": result.get("boms", []),
+                "total_count": len(result.get("boms", [])),
+                "message": f"Found {len(result.get('boms', []))} BOMs"
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Failed to list BOMs: {str(e)}",
+                "boms": []
+            }
+
+
+# ================================================================================================
+# SIMPLIFIED SERVICE CONTAINER
+# ================================================================================================
+
+class ServiceContainer:
+    """Simplified dependency injection container"""
+
+    def __init__(self, config, session_id: str = None):
+        self.config = config
+        self.session_id = session_id or str(uuid.uuid4())
+        self._services: Dict[str, Any] = {}
+        self._initialized = False
+
+    async def initialize(self) -> None:
+        """Initialize all services"""
+        if self._initialized:
+            return
+
+        try:
+            # Create LLM
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash-lite",
+                google_api_key=self.config.google_api_key,
+                temperature=0.1,
+                max_output_tokens=30000,
+            )
+
+            # Create Silicon Expert client
+            from src.clients.silicon_expert_client import SiliconExpertClient
+            se_client = SiliconExpertClient(self.config.silicon_expert)
+            await se_client.authenticate()
+
+            # Create memory service
+            from src.services.memory_service import MemoryService
+            memory_service = MemoryService(self.session_id)
+
+            # Initialize services
+            self._services = {
+                "llm": llm,
+                "silicon_expert_client": se_client,
+                "memory": memory_service,
+                "schematic": SchematicService(llm),
+                "component": ComponentService(se_client, memory_service),
+                "bom": BOMService(se_client, memory_service)
+            }
+
+            # Initialize all services
+            for name, service in self._services.items():
+                if isinstance(service, ServiceInterface):
+                    await service.initialize()
+
+            self._initialized = True
+
+        except Exception as e:
+            print(f"Service container initialization failed: {str(e)}")
+            raise
+
+    def get_service(self, service_name: str) -> Any:
+        """Get service by name"""
+        if not self._initialized:
+            raise RuntimeError("Container not initialized. Call await container.initialize() first.")
+        return self._services.get(service_name)
+
+    async def cleanup(self) -> None:
+        """Cleanup all services"""
+        for service in self._services.values():
+            if isinstance(service, ServiceInterface):
+                await service.cleanup()
+            elif hasattr(service, 'close'):
+                await service.close()
+
+        self._services.clear()
+        self._initialized = False
+
+
+# ================================================================================================
+# TOOL FACTORY - Creates React Agent Tools
+# ================================================================================================
+
+class ToolFactory:
+    """Factory for creating React agent tools"""
+
+    def __init__(self, container: ServiceContainer):
+        self.container = container
+
+    def create_tools(self) -> List[Tool]:
+        """Create all BOM agent tools"""
+        return [
+            self._create_analyze_schematic_tool(),
+            self._create_search_components_tool(),
+            self._create_create_bom_tool(),
+            self._create_add_parts_tool(),
+            self._create_list_boms_tool(),
+            self._create_help_tool()
         ]
 
-        return any(pattern in user_input_lower for pattern in simple_patterns)
+    def _create_analyze_schematic_tool(self) -> Tool:
+        async def analyze_schematic(image_url: str) -> str:
+            service = self.container.get_service("schematic")
+            result = await service.analyze_schematic(image_url)
 
-    def _fallback_intent_classification(self, user_input: str) -> IntentResult:
-        """Fallback rule-based intent classification when LLM fails."""
-        user_input_lower = user_input.lower().strip()
+            if result["success"]:
+                components = result["components"]
+                confidence = result.get("confidence", 0)
 
-        # Rule-based classification patterns
-        if any(keyword in user_input_lower for keyword in ["schematic", "analyze", "image", "circuit"]):
-            # Look for URLs in the input
-            import re
-            urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+',
-                              user_input)
-            parameters = {"image_url": urls[0]} if urls else {}
-            return IntentResult(
-                intent="analyze_schematic",
-                confidence=0.8,
-                parameters=parameters,
-                is_valid=True
-            )
+                if not components:
+                    return "⚠️ No components found in the schematic. Please check the image quality and try again."
 
-        elif any(keyword in user_input_lower for keyword in ["search", "find", "component", "part"]):
-            return IntentResult(
-                intent="search_components",
-                confidence=0.8,
-                parameters={"search_terms": user_input},
-                is_valid=True
-            )
+                output = f"✅ Analyzed schematic successfully!\n"
+                output += f"📊 Found {len(components)} components (Average confidence: {confidence:.1%})\n\n"
 
-        elif any(keyword in user_input_lower for keyword in ["create", "new bom", "make bom"]):
-            # Try to extract BOM name
-            words = user_input.split()
-            bom_name = ""
-            if "called" in user_input_lower:
-                try:
-                    called_idx = [i for i, w in enumerate(words) if w.lower() == "called"][0]
-                    if called_idx + 1 < len(words):
-                        bom_name = words[called_idx + 1]
-                except (IndexError, ValueError):
-                    pass
+                # Show top 5 components with details
+                for i, comp in enumerate(components[:5], 1):
+                    name = comp.get('name', 'Unknown')
+                    conf = comp.get('confidence', 0)
+                    desc = comp.get('description', '')
+                    output += f"{i}. {name} ({conf:.1%} confidence)"
+                    if desc:
+                        output += f" - {desc}"
+                    output += "\n"
 
-            return IntentResult(
-                intent="create_bom",
-                confidence=0.8,
-                parameters={"bom_name": bom_name, "project": "", "description": ""},
-                is_valid=True
-            )
+                if len(components) > 5:
+                    output += f"... and {len(components) - 5} more components\n"
 
-        elif any(keyword in user_input_lower for keyword in ["add parts", "add to", "add component"]):
-            return IntentResult(
-                intent="add_parts",
-                confidence=0.8,
-                parameters={"bom_name": "", "project": ""},
-                is_valid=True
-            )
+                output += "\n💡 Next steps: Create a BOM with these components or search for more details."
+                return output
+            else:
+                return f"❌ Schematic analysis failed: {result['error']}"
 
-        elif any(keyword in user_input_lower for keyword in
-                 ["show", "list", "get", "display"]) and "bom" in user_input_lower:
-            return IntentResult(
-                intent="show_boms",
-                confidence=0.9,  # High confidence for this simple pattern
-                parameters={},
-                is_valid=True
-            )
-
-        else:
-            return IntentResult(
-                intent="unknown",
-                confidence=0.3,
-                parameters={},
-                is_valid=False,
-                error_message=f"Could not understand the request: '{user_input}'. Please try rephrasing or use commands like 'show boms', 'create bom', 'search components', or 'analyze schematic'."
-            )
-
-    async def _request_human_approval(self, state: AgentState) -> AgentState:
-        """Request human approval with timeout handling."""
-        approval_request = state.get("pending_approval")
-        if approval_request:
-            state["awaiting_human_input"] = True
-            # This will interrupt the graph execution
-
-        return state
-
-    async def _handle_error(self, state: AgentState) -> AgentState:
-        """Centralized error handling with proper null checks."""
-        error = state.get("error") or "Unknown error occurred"
-
-        # Ensure error is a string
-        if not isinstance(error, str):
-            error = str(error) if error is not None else "Unknown error occurred"
-
-        # Log error (in production, use proper logging)
-        print(f"Agent Error: {error}")
-
-        # Determine if error is retryable - with null safety
-        retryable_errors = [
-            "network", "timeout", "rate limit", "temporary", "authentication"
-        ]
-
-        error_lower = error.lower() if error else ""
-        is_retryable = any(keyword in error_lower for keyword in retryable_errors)
-        retry_count = state.get("retry_count", 0)
-
-        if is_retryable and retry_count < 3:
-            state["should_retry"] = True
-            state["retry_count"] = retry_count + 1
-        else:
-            state["should_retry"] = False
-
-        # Prepare error response
-        state["step_result"] = {
-            "success": False,
-            "error": error,
-            "retry_count": retry_count,
-            "is_retryable": is_retryable
-        }
-
-        return state
-
-    async def _format_response(self, state: AgentState) -> AgentState:
-        """Format the final response with proper UI recommendations."""
-        step_result = state.get("step_result", {})
-
-        # Fix: Generate UI recommendations as UIRecommendation object, not dict
-        ui_recommendations = self._generate_ui_recommendations(step_result)
-
-        response = AgentResponse(
-            success=not bool(state.get("error")),
-            data=step_result,
-            response_type=self._determine_response_type(step_result),
-            error=state.get("error"),
-            metadata={
-                "session_id": self.container.session_id,
-                "step": state.get("next_step"),
-                "retry_count": state.get("retry_count", 0)
-            },
-            ui_recommendations=ui_recommendations  # This should be UIRecommendation object or None
+        return Tool(
+            name="analyze_schematic",
+            description="Analyze circuit schematic from image URL to extract components. Input should be a valid image URL (http/https).",
+            func=lambda url: asyncio.run(analyze_schematic(url))
         )
 
-        state["final_response"] = response.to_dict()
-        return state
+    def _create_search_components_tool(self) -> Tool:
+        async def search_components(query: str) -> str:
+            service = self.container.get_service("component")
+            result = await service.search_components(query)
 
-    def _generate_ui_recommendations(self, result: Dict[str, Any]) -> Optional['UIRecommendation']:
-        """Generate UI rendering recommendations as UIRecommendation object."""
-        from src.models.state import UIRecommendation  # Import here to avoid circular imports
+            if result["success"] and result["components"]:
+                comp = result["components"][0]
+                output = f"✅ Component found!\n\n"
+                output += f"🔍 **Search Result for: {query}**\n"
+                output += f"📦 Part Number: {comp.get('part_number') or 'Not available'}\n"
+                output += f"🏭 Manufacturer: {comp.get('manufacturer') or 'Not available'}\n"
+                output += f"📝 Description: {comp.get('description') or 'Not available'}\n"
+                output += f"⭐ Confidence: {comp.get('confidence', 0):.1%}\n\n"
+                output += "💡 You can now add this component to a BOM or search for similar parts."
+                return output
+            else:
+                return f"❌ No components found matching '{query}'. Try using:\n" + \
+                    "• Part numbers (e.g., 'LM358')\n" + \
+                    "• Component types (e.g., 'Arduino Uno')\n" + \
+                    "• Manufacturer codes"
 
-        if not result or not result.get("success", True):
-            # For error cases
-            return UIRecommendation(
-                display_type=ResponseType.ERROR,
-                actions=["retry", "modify_request"]
+        return Tool(
+            name="search_components",
+            description="Search for electronic components by name, part number, or description. Input should be component name, part number, or description.",
+            func=lambda query: asyncio.run(search_components(query))
+        )
+
+    def _create_create_bom_tool(self) -> Tool:
+        async def create_bom(params: str) -> str:
+            # Parse parameters: "name=MyBOM,project=Arduino,description=Power supply BOM"
+            parsed = self._parse_tool_params(params)
+            name = parsed.get("name", "").strip()
+
+            if not name:
+                return "❌ BOM name is required.\n\n" + \
+                    "📝 **Usage:** name=BOM_NAME,project=PROJECT_NAME,description=DESCRIPTION\n" + \
+                    "📋 **Example:** name=PowerSupply,project=Arduino,description=Main power circuit"
+
+            service = self.container.get_service("bom")
+            result = await service.create_bom(
+                name=name,
+                project=parsed.get("project", ""),
+                description=parsed.get("description", "")
             )
 
-        # Determine display type
-        response_type = self._determine_response_type(result)
+            if result["success"]:
+                output = f"✅ BOM created successfully!\n\n"
+                output += f"📋 **BOM Details:**\n"
+                output += f"• Name: {name}\n"
+                if parsed.get("project"):
+                    output += f"• Project: {parsed.get('project')}\n"
+                if parsed.get("description"):
+                    output += f"• Description: {parsed.get('description')}\n"
+                output += "\n💡 Next step: Add components to your new BOM."
+                return output
+            else:
+                return f"❌ Failed to create BOM: {result['error']}"
 
-        if response_type == ResponseType.TABLE:
-            # For table displays (components, search results)
-            columns = self._extract_table_columns(result)
-            return UIRecommendation(
-                display_type=ResponseType.TABLE,
-                columns=columns,
-                sortable_columns=columns,
-                filterable_columns=columns[:5] if len(columns) > 5 else columns,
-                actions=["create_bom", "search_more_details", "export"]
+        return Tool(
+            name="create_bom",
+            description="Create a new Bill of Materials (BOM). Input format: name=BOM_NAME,project=PROJECT_NAME,description=DESCRIPTION (project and description are optional)",
+            func=lambda params: asyncio.run(create_bom(params))
+        )
+
+    def _create_add_parts_tool(self) -> Tool:
+        async def add_parts(params: str) -> str:
+            parsed = self._parse_tool_params(params)
+            bom_name = parsed.get("bom_name", "").strip()
+
+            if not bom_name:
+                return "❌ BOM name is required.\n\n" + \
+                    "📝 **Usage:** bom_name=BOM_NAME\n" + \
+                    "⚠️ **Note:** Components must be found first (via schematic analysis or search)"
+
+            # Get components from schematic service
+            schematic_service = self.container.get_service("schematic")
+            components = schematic_service.get_last_components() if hasattr(schematic_service,
+                                                                            'get_last_components') else []
+
+            if not components:
+                return "⚠️ No components available to add.\n\n" + \
+                    "💡 **To add parts:**\n" + \
+                    "1. First analyze a schematic or search for components\n" + \
+                    "2. Then use this command to add them to your BOM"
+
+            bom_service = self.container.get_service("bom")
+            result = await bom_service.add_parts_to_bom(bom_name, components)
+
+            if result["success"]:
+                output = f"✅ Parts added successfully!\n\n"
+                output += f"📋 **Added to BOM:** {bom_name}\n"
+                output += f"📦 **Parts Count:** {len(components)}\n\n"
+                output += "**Components Added:**\n"
+                for i, comp in enumerate(components[:5], 1):
+                    output += f"{i}. {comp.name}"
+                    if comp.part_number:
+                        output += f" ({comp.part_number})"
+                    output += "\n"
+                if len(components) > 5:
+                    output += f"... and {len(components) - 5} more\n"
+                return output
+            else:
+                return f"❌ Failed to add parts: {result['error']}"
+
+        return Tool(
+            name="add_parts_to_bom",
+            description="Add previously analyzed/searched components to an existing BOM. Input format: bom_name=BOM_NAME",
+            func=lambda params: asyncio.run(add_parts(params))
+        )
+
+    def _create_list_boms_tool(self) -> Tool:
+        async def list_boms(project_filter: str = "") -> str:
+            service = self.container.get_service("bom")
+            result = await service.list_boms(project_filter.strip())
+
+            if result["success"]:
+                boms = result["boms"]
+                if not boms:
+                    return "📝 No BOMs found.\n\n💡 Create your first BOM to get started!"
+
+                output = f"📋 **BOMs Overview** ({len(boms)} found)\n\n"
+
+                # Group by project if available
+                projects = {}
+                for bom in boms:
+                    project = bom.get('project') or 'Unassigned'
+                    if project not in projects:
+                        projects[project] = []
+                    projects[project].append(bom)
+
+                for project, project_boms in projects.items():
+                    if len(projects) > 1:
+                        output += f"**📁 {project}:**\n"
+
+                    for bom in project_boms[:10]:  # Limit display
+                        name = bom.get('name', 'Unknown')
+                        created = bom.get('created_at', '')
+                        parts_count = bom.get('component_count', 'N/A')
+
+                        output += f"• {name}"
+                        if parts_count != 'N/A':
+                            output += f" ({parts_count} parts)"
+                        if created:
+                            try:
+                                from datetime import datetime
+                                dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                                output += f" - Created {dt.strftime('%Y-%m-%d')}"
+                            except:
+                                pass
+                        output += "\n"
+
+                    if len(project_boms) > 10:
+                        output += f"... and {len(project_boms) - 10} more BOMs\n"
+                    output += "\n"
+
+                return output.strip()
+            else:
+                return f"❌ Failed to retrieve BOMs: {result['error']}"
+
+        return Tool(
+            name="list_boms",
+            description="List all existing BOMs, optionally filtered by project name. Input: project_name (optional, leave empty for all BOMs)",
+            func=lambda project: asyncio.run(list_boms(project))
+        )
+
+    def _create_help_tool(self) -> Tool:
+        def show_help(_: str = "") -> str:
+            return """
+🔧 **BOM Agent - Your Electronic Design Assistant**
+
+**🎯 Core Capabilities:**
+1. **📸 Analyze Schematics** - Extract components from circuit diagrams
+2. **🔍 Search Components** - Find electronic parts and specifications  
+3. **📋 Create BOMs** - Build Bill of Materials for projects
+4. **📦 Add Parts** - Add components to existing BOMs
+5. **📊 List BOMs** - View and manage your BOMs
+
+**💬 Example Commands:**
+• *"Analyze this schematic: https://example.com/circuit.jpg"*
+• *"Search for Arduino Uno microcontroller"*
+• *"Create BOM called PowerSupply for Arduino project with description Main power circuit"*
+• *"Show me all my BOMs"*
+• *"Add parts to PowerSupply BOM"*
+
+**🏗️ Typical Workflow:**
+1. **Analyze** a schematic to extract components
+2. **Create** a new BOM for your project  
+3. **Add** the analyzed components to your BOM
+4. **Search** for additional components as needed
+5. **List** your BOMs to manage projects
+
+**💡 Pro Tips:**
+• Use clear, high-quality schematic images for best results
+• Include project names to organize your BOMs
+• Search using specific part numbers for accurate results
+
+Ready to help with your electronic design projects! 🚀
+            """
+
+        return Tool(
+            name="help",
+            description="Show available commands, capabilities, and usage examples",
+            func=show_help
+        )
+
+    def _parse_tool_params(self, params: str) -> Dict[str, str]:
+        """Parse comma-separated key=value parameters"""
+        result = {}
+        if not params or params.strip() == "":
+            return result
+
+        try:
+            for pair in params.split(","):
+                if "=" in pair:
+                    key, value = pair.split("=", 1)
+                    result[key.strip()] = value.strip()
+        except Exception as e:
+            print(f"Error parsing tool parameters '{params}': {e}")
+
+        return result
+
+
+# ================================================================================================
+# MAIN SIMPLIFIED BOM AGENT
+# ================================================================================================
+
+class SimpleBOMAgent:
+    """Simplified React-based BOM Agent for Angular UI integration"""
+
+    def __init__(self, config, session_id: Optional[str] = None):
+        self.config = config
+        self.session_id = session_id or str(uuid.uuid4())
+        self.container = ServiceContainer(config, self.session_id)
+        self.agent = None
+        self._conversation_history: List[Dict[str, Any]] = []
+        self._max_history = 50  # Limit conversation history
+
+    async def initialize(self) -> None:
+        """Initialize the agent and all services"""
+        try:
+            await self.container.initialize()
+
+            # Create tools and agent
+            tool_factory = ToolFactory(self.container)
+            tools = tool_factory.create_tools()
+
+            llm = self.container.get_service("llm")
+
+            self.agent = initialize_agent(
+                tools=tools,
+                llm=llm,
+                agent=AgentType.SELF_ASK_WITH_SEARCH,
+                verbose=False,
+                max_iterations=3,  # Limit iterations for faster response
+                early_stopping_method="generate",
+                return_intermediate_steps=False  # Cleaner output
             )
 
-        elif response_type == ResponseType.TREE:
-            # For tree displays (BOMs, projects)
-            return UIRecommendation(
-                display_type=ResponseType.TREE,
-                actions=["expand_all", "collapse_all", "filter", "export"],
-                grouping_options=["project", "manufacturer", "category"]
+        except Exception as e:
+            print(f"Agent initialization failed: {str(e)}")
+            raise
+
+    async def process_request(self, user_input: str) -> AgentResponse:
+        """Process user request and return standardized response for Angular UI"""
+        response_id = str(uuid.uuid4())
+
+        try:
+            if not self.agent:
+                await self.initialize()
+
+            # Add to conversation history
+            self._add_to_history("human", user_input)
+
+            # Process with React agent
+            result = await self.agent.arun(user_input)
+
+            # Clean up the result (remove any intermediate steps formatting)
+            cleaned_result = self._clean_agent_output(result)
+
+            # Add agent response to history
+            self._add_to_history("ai", cleaned_result)
+
+            # Determine response type and suggestions
+            response_type = self._determine_response_type(cleaned_result)
+            suggestions = self._generate_suggestions(user_input, cleaned_result)
+
+            return AgentResponse(
+                id=response_id,
+                success=True,
+                type=response_type,
+                message=cleaned_result,
+                data={"session_id": self.session_id},
+                suggestions=suggestions
             )
 
-        elif response_type == ResponseType.STATUS:
-            # For status displays
-            return UIRecommendation(
-                display_type=ResponseType.STATUS,
-                actions=["refresh", "clear"]
+        except Exception as e:
+            error_msg = f"I apologize, but I encountered an error processing your request: {str(e)}\n\n" + \
+                        "Please try:\n• Rephrasing your request\n• Using the 'help' command\n• Checking if URLs are accessible"
+
+            self._add_to_history("ai", error_msg)
+
+            return AgentResponse(
+                id=response_id,
+                success=False,
+                type=ResponseType.ERROR,
+                message=error_msg,
+                suggestions=["Try rephrasing your request", "Use 'help' to see available commands",
+                             "Check your input format"]
             )
 
-        else:
-            # Generic display
-            return UIRecommendation(
-                display_type=ResponseType.GENERIC,
-                actions=self._suggest_next_actions(result)
-            )
+    def _clean_agent_output(self, output: str) -> str:
+        """Clean up agent output for better UI presentation"""
+        # Remove any React agent formatting artifacts
+        cleaned = output.replace("Action:", "").replace("Observation:", "")
+        cleaned = cleaned.replace("Thought:", "").replace("Final Answer:", "")
 
-    def _determine_response_type(self, result: Dict[str, Any]) -> ResponseType:
-        """Determine the appropriate response type for UI rendering."""
-        if result.get("success") is False:
+        # Remove excessive newlines
+        while "\n\n\n" in cleaned:
+            cleaned = cleaned.replace("\n\n\n", "\n\n")
+
+        return cleaned.strip()
+
+    def _add_to_history(self, message_type: str, content: str):
+        """Add message to conversation history with size limit"""
+        self._conversation_history.append({
+            "type": message_type,
+            "content": content,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        # Keep only recent messages
+        if len(self._conversation_history) > self._max_history:
+            self._conversation_history = self._conversation_history[-self._max_history:]
+
+    def _determine_response_type(self, result: str) -> ResponseType:
+        """Determine UI response type based on agent output"""
+        result_lower = result.lower()
+
+        if "❌" in result or "error" in result_lower or "failed" in result_lower or "apologize" in result_lower:
             return ResponseType.ERROR
-        elif "components" in result:
+        elif ("found" in result_lower and ("component" in result_lower or "bom" in result_lower)) or "📋" in result:
             return ResponseType.TABLE
-        elif "projects" in result or "boms" in result:
+        elif "📁" in result or "project" in result_lower:
             return ResponseType.TREE
+        elif "✅" in result or "successfully" in result_lower:
+            return ResponseType.SUCCESS
         else:
-            return ResponseType.GENERIC
+            return ResponseType.SUCCESS
 
-    def _extract_table_columns(self, result: Dict[str, Any]) -> List[str]:
-        """Extract appropriate columns for table display."""
-        if "components" in result and result["components"]:
-            first_component = result["components"][0]
-            return list(first_component.keys()) if isinstance(first_component, dict) else []
-        return []
+    def _generate_suggestions(self, user_input: str, agent_output: str) -> List[str]:
+        """Generate contextual suggestions for Angular UI"""
+        suggestions = []
+        user_lower = user_input.lower()
+        output_lower = agent_output.lower()
 
-    def _suggest_next_actions(self, result: Dict[str, Any]) -> List[str]:
-        """Suggest next possible actions based on result."""
-        actions = []
-
-        if result.get("success") is False:
-            actions.extend(["retry", "modify_request"])
-        elif "components" in result:
-            actions.extend(["create_bom", "search_more_details"])
-        elif "boms" in result:
-            actions.extend(["add_parts", "export_bom"])
-
-        return actions
-
-    def _generate_summary(self, result: Dict[str, Any]) -> str:
-        """Generate a human-readable summary."""
-        if result.get("success") is False:
-            return f"Error: {result.get('error', 'Operation failed')}"
-        elif "components" in result:
-            count = len(result["components"])
-            return f"Found {count} components ready for BOM creation"
-        elif "boms" in result:
-            count = len(result.get("boms", []))
-            return f"Retrieved {count} existing BOMs"
+        # Context-aware suggestions
+        if "schematic" in user_lower and ("found" in output_lower or "✅" in agent_output):
+            suggestions.extend([
+                "Create a new BOM with these components",
+                "Search for more component details",
+                "Add these parts to existing BOM"
+            ])
+        elif "search" in user_lower and ("found" in output_lower or "✅" in agent_output):
+            suggestions.extend([
+                "Add this component to a BOM",
+                "Search for similar components",
+                "Create new BOM with this part"
+            ])
+        elif "create" in user_lower and "bom" in user_lower and "✅" in agent_output:
+            suggestions.extend([
+                "Add components to this BOM",
+                "Analyze a schematic for parts",
+                "List all BOMs"
+            ])
+        elif "list" in user_lower or "show" in user_lower:
+            suggestions.extend([
+                "Create a new BOM",
+                "Analyze a schematic",
+                "Search for components"
+            ])
+        elif "❌" in agent_output or "error" in output_lower:
+            suggestions.extend([
+                "Try rephrasing your request",
+                "Use 'help' command",
+                "Check input format"
+            ])
         else:
-            return "Operation completed successfully"
+            suggestions.extend([
+                "Analyze a schematic image",
+                "Search for components",
+                "Create a new BOM",
+                "Show help"
+            ])
 
-    def _should_auto_approve(self, result: Dict[str, Any]) -> bool:
-        """Determine if result should be auto-approved."""
-        confidence = result.get("confidence", 0.0)
-        return confidence > (self.approval_config.auto_approve_threshold or 0.95)
+        return suggestions[:3]  # Limit to 3 suggestions
 
-    def _should_auto_approve_parts(self, parts_data: Dict[str, Any]) -> bool:
-        """Determine if parts addition should be auto-approved."""
-        part_count = len(parts_data.get("parts", []))
-        confidence = parts_data.get("confidence", 0.0)
-        return part_count <= 5 and confidence > 0.9
+    async def get_conversation_history(self) -> List[Dict[str, Any]]:
+        """Get conversation history for Angular UI"""
+        return self._conversation_history.copy()
 
-    async def process_request(self, user_input: str, session_id: Optional[str] = None) -> Dict[str, Any]:
-        """Process user request through the corrected graph."""
-        initial_state = AgentState(
-            messages=[HumanMessage(content=user_input)],
-            session_id=session_id or self.container.session_id,
-            current_request={},
-            step_result=None,
-            next_step=None,
-            requires_approval=False,
-            human_approval=None,
-            human_feedback=None,
-            pending_approval=None,
-            awaiting_human_input=False,
-            error=None,
-            confidence=0.0,
-            metadata={},
-            final_response=None
-        )
+    async def clear_history(self) -> None:
+        """Clear conversation history"""
+        self._conversation_history.clear()
 
-        config = {"configurable": {"thread_id": session_id or self.container.session_id}}
-
-        try:
-            result = await self.graph.ainvoke(initial_state, config)
-            return result.get("final_response", {})
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "response_type": "error",
-                "data": None
-            }
-
-    async def handle_human_approval(self, session_id: str, approval: bool,
-                                    feedback: Optional[str] = None) -> Dict[str, Any]:
-        """Handle human approval response."""
-        config = {"configurable": {"thread_id": session_id}}
-
-        approval_state = {
-            "human_approval": "approved" if approval else "rejected",
-            "human_feedback": feedback
+    async def get_session_info(self) -> Dict[str, Any]:
+        """Get session information"""
+        return {
+            "session_id": self.session_id,
+            "history_count": len(self._conversation_history),
+            "initialized": self.agent is not None,
+            "last_activity": self._conversation_history[-1]["timestamp"] if self._conversation_history else None
         }
 
-        try:
-            result = await self.graph.ainvoke(approval_state, config)
-            return result.get("final_response", {})
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "response_type": "error"
-            }
-
-
-# Factory function
-async def create_bom_agent(config: AppConfig, session_id: Optional[str] = None) -> ModernBOMAgent:
-    """Factory function to create and initialize the BOM agent."""
-    agent = ModernBOMAgent(config, session_id)
-    return agent
+    async def cleanup(self) -> None:
+        """Cleanup resources"""
+        await self.container.cleanup()
+        self._conversation_history.clear()
+        self.agent = None

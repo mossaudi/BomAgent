@@ -1,370 +1,292 @@
-# server.py - FastAPI server with human-in-the-loop support
-"""FastAPI server for BOM agent with real-time human approval."""
-
-import asyncio
+# ================================================================================================
+# FASTAPI SERVER - Clean & Simple
+# ================================================================================================
 import uuid
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, validator
 
-from src.core.config import AppConfig
-from main import ModernBOMAgent
-from src.models.state import HumanApprovalRequest
+from config import AppConfig
+from main import SimpleBOMAgent
 
 
+# Request/Response models for API
 class ChatRequest(BaseModel):
-    """Enhanced chat request with validation."""
     message: str
     session_id: Optional[str] = None
-    user_id: Optional[str] = None
 
     @validator('message')
     def validate_message(cls, v):
         if not v or not v.strip():
             raise ValueError('Message cannot be empty')
-        if len(v) > 10000:
-            raise ValueError('Message too long (max 10000 characters)')
+        if len(v) > 5000:  # Reasonable limit
+            raise ValueError('Message too long (max 5000 characters)')
         return v.strip()
 
 
-class ApprovalResponse(BaseModel):
-    """Enhanced approval response with validation."""
-    approval_id: str
-    approved: bool
-    feedback: Optional[str] = None
-    modifications: Optional[Dict[str, Any]] = None
-
-    @validator('feedback')
-    def validate_feedback(cls, v):
-        if v and len(v) > 1000:
-            raise ValueError('Feedback too long (max 1000 characters)')
-        return v
-
-
 class ChatResponse(BaseModel):
-    """Enhanced chat response."""
     id: str
     success: bool
-    response_type: str
-    data: Optional[Any] = None
-    message: Optional[str] = None
-    ui_recommendations: Optional[Dict[str, Any]] = None
-    approval_request: Optional[Dict[str, Any]] = None
-    session_id: str
+    type: str
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    suggestions: List[str] = []
     timestamp: str
-    error_code: Optional[str] = None
 
 
+class HistoryResponse(BaseModel):
+    session_id: str
+    history: List[Dict[str, Any]]
+    total_count: int
+
+
+class SessionInfoResponse(BaseModel):
+    session_id: str
+    history_count: int
+    initialized: bool
+    last_activity: Optional[str]
+
+
+# Enhanced session management
 class SessionManager:
-    """Thread-safe session management with proper async initialization."""
-
     def __init__(self):
-        self._agents: Dict[str, ModernBOMAgent] = {}
-        self._pending_approvals: Dict[str, HumanApprovalRequest] = {}
-        self._session_activity: Dict[str, datetime] = {}
-        self._lock = asyncio.Lock()
-        self._cleanup_task = None
-        self._initialized = False
+        self._agents: Dict[str, SimpleBOMAgent] = {}
+        self._last_activity: Dict[str, datetime] = {}
 
-    async def initialize(self):
-        """Initialize the session manager with event loop."""
-        if not self._initialized:
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
-            self._initialized = True
+    async def get_agent(self, session_id: str, config) -> SimpleBOMAgent:
+        """Get or create agent for session"""
+        if session_id not in self._agents:
+            agent = SimpleBOMAgent(config, session_id)
+            await agent.initialize()
+            self._agents[session_id] = agent
 
-    async def _periodic_cleanup(self):
-        """Clean up inactive sessions."""
-        while True:
-            try:
-                await asyncio.sleep(1800)  # Check every 30 minutes
-                await self._cleanup_inactive_sessions()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(f"Session cleanup error: {e}")
+        # Update last activity
+        self._last_activity[session_id] = datetime.now()
+        return self._agents[session_id]
 
-    async def _cleanup_inactive_sessions(self):
-        """Remove inactive sessions (older than 2 hours)."""
-        async with self._lock:
-            cutoff_time = datetime.now() - timedelta(hours=2)
-            inactive_sessions = [
-                session_id for session_id, last_activity in self._session_activity.items()
-                if last_activity < cutoff_time
-            ]
+    async def cleanup_session(self, session_id: str) -> bool:
+        """Cleanup specific session"""
+        if session_id in self._agents:
+            await self._agents[session_id].cleanup()
+            del self._agents[session_id]
+            self._last_activity.pop(session_id, None)
+            return True
+        return False
 
-            for session_id in inactive_sessions:
-                if session_id in self._agents:
-                    await self._agents[session_id].container.cleanup()
-                    del self._agents[session_id]
+    async def cleanup_inactive_sessions(self, max_age_hours: int = 2):
+        """Cleanup sessions older than max_age_hours"""
+        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+        inactive_sessions = [
+            sid for sid, last_time in self._last_activity.items()
+            if last_time < cutoff
+        ]
 
-                self._session_activity.pop(session_id, None)
+        for session_id in inactive_sessions:
+            await self.cleanup_session(session_id)
 
-                # Clean up related approvals
-                approvals_to_remove = [
-                    approval_id for approval_id, approval in self._pending_approvals.items()
-                    if approval.metadata.get("session_id") == session_id
-                ]
-                for approval_id in approvals_to_remove:
-                    del self._pending_approvals[approval_id]
+        return len(inactive_sessions)
 
-    async def get_or_create_agent(self, session_id: str) -> ModernBOMAgent:
-        """Thread-safe agent creation."""
-        async with self._lock:
-            if session_id not in self._agents:
-                config = AppConfig.from_env()
-                agent = ModernBOMAgent(config, session_id)
-                await agent.container.initialize()
-                self._agents[session_id] = agent
+    def get_active_sessions(self) -> List[str]:
+        """Get list of active session IDs"""
+        return list(self._agents.keys())
 
-            self._session_activity[session_id] = datetime.now()
-            return self._agents[session_id]
-
-    async def add_pending_approval(self, approval_req: HumanApprovalRequest):
-        """Add pending approval."""
-        async with self._lock:
-            self._pending_approvals[approval_req.id] = approval_req
-
-    async def get_pending_approval(self, approval_id: str) -> Optional[HumanApprovalRequest]:
-        """Get and remove pending approval."""
-        async with self._lock:
-            return self._pending_approvals.pop(approval_id, None)
-
-    async def get_session_stats(self) -> Dict[str, Any]:
-        """Get session statistics."""
-        async with self._lock:
-            return {
-                "active_sessions": len(self._agents),
-                "pending_approvals": len(self._pending_approvals),
-                "sessions": list(self._agents.keys())
-            }
-
-    async def shutdown(self):
-        """Shutdown the session manager."""
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            try:
-                await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
-
-        # Cleanup all sessions
-        async with self._lock:
-            for agent in self._agents.values():
-                try:
-                    await agent.container.cleanup()
-                except Exception as e:
-                    print(f"Cleanup error: {e}")
-
-        self._initialized = False
+    async def cleanup_all(self):
+        """Cleanup all sessions"""
+        for agent in self._agents.values():
+            await agent.cleanup()
+        self._agents.clear()
+        self._last_activity.clear()
 
 
-# Global session manager - will be initialized in lifespan
-session_manager = SessionManager()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Enhanced application lifespan manager."""
-    print("🚀 Enhanced BOM Agent API starting up...")
-
-    # Initialize session manager
-    await session_manager.initialize()
-
-    # Validate configuration
-    config = AppConfig.from_env()
-    validation_errors = config.validate()
-    if validation_errors:
-        print("❌ Configuration errors:")
-        for error in validation_errors:
-            print(f"  - {error}")
-        raise RuntimeError("Invalid configuration")
-
-    print("✅ Configuration validated")
-    print("✅ Session manager initialized")
-
-    yield
-
-    print("🔄 BOM Agent API shutting down...")
-
-    # Shutdown session manager
-    await session_manager.shutdown()
-
-    print("✅ Cleanup completed")
-
-# Initialize FastAPI app
+# Create FastAPI app
 app = FastAPI(
-    title="Enhanced BOM Agent API",
-    description="Intelligent BOM Management Agent with Human-in-the-Loop",
-    version="2.1.0",
-    lifespan=lifespan
+    title="BOM Agent API",
+    description="Simplified BOM Management Agent with React Pattern",
+    version="2.0.0"
 )
 
-# Enhanced CORS middleware
+# CORS for Angular frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200", "http://localhost:3000"],
+    allow_origins=["http://localhost:4200", "http://localhost:3000"],  # Angular dev server
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
+# Global session manager
+session_manager = SessionManager()
 
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    """Add processing time header."""
-    start_time = datetime.now()
-    response = await call_next(request)
-    process_time = (datetime.now() - start_time).total_seconds()
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
+
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    """Validate configuration on startup"""
+    try:
+        config = AppConfig.from_env()
+        validation_errors = config.validate()
+
+        if validation_errors:
+            print("❌ Configuration errors:")
+            for error in validation_errors:
+                print(f"  - {error}")
+            raise RuntimeError("Invalid configuration")
+
+        print("✅ BOM Agent API started successfully")
+
+    except Exception as e:
+        print(f"❌ Startup failed: {e}")
+        raise
+
+
+# Shutdown event
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    await session_manager.cleanup_all()
+    print("👋 BOM Agent API shut down")
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def enhanced_chat(request: ChatRequest, background_tasks: BackgroundTasks):
-    """Enhanced chat endpoint with proper validation and error handling."""
+async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
+    """Main chat endpoint for Angular UI"""
     try:
+        # Load configuration
+        config = AppConfig.from_env()
+
+        # Get or create agent for session
         session_id = request.session_id or str(uuid.uuid4())
-        agent = await session_manager.get_or_create_agent(session_id)
+        agent = await session_manager.get_agent(session_id, config)
 
-        # Process the request
-        result = await agent.process_request(request.message, session_id)
+        # Process request
+        response = await agent.process_request(request.message)
 
-        # Handle approval requests
-        if result.get("approval_request"):
-            approval_req = HumanApprovalRequest(**result["approval_request"])
-            approval_req.metadata["session_id"] = session_id
-            await session_manager.add_pending_approval(approval_req)
+        # Schedule cleanup of inactive sessions in background
+        background_tasks.add_task(session_manager.cleanup_inactive_sessions)
 
-            return ChatResponse(
-                id=str(uuid.uuid4()),
-                success=True,
-                response_type="approval_request",
-                data=result.get("data"),
-                message="Human approval required",
-                approval_request=approval_req.to_dict(),
-                session_id=session_id,
-                timestamp=datetime.now().isoformat()
-            )
-
-        # Return normal response
-        return ChatResponse(
-            id=str(uuid.uuid4()),
-            success=result.get("success", True),
-            response_type=result.get("response_type", "generic"),
-            data=result.get("data"),
-            message=result.get("message"),
-            ui_recommendations=result.get("ui_recommendations"),
-            session_id=session_id,
-            timestamp=datetime.now().isoformat(),
-            error_code=result.get("error_code")
-        )
+        return ChatResponse(**response.to_dict())
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        print(f"Chat endpoint error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.post("/api/approval/{approval_id}", response_model=ChatResponse)
-async def handle_enhanced_approval(approval_id: str, response: ApprovalResponse):
-    """Enhanced approval handling with validation."""
+@app.get("/api/history/{session_id}", response_model=HistoryResponse)
+async def get_history(session_id: str):
+    """Get conversation history for session"""
     try:
-        approval_request = await session_manager.get_pending_approval(approval_id)
-        if not approval_request:
-            raise HTTPException(status_code=404, detail="Approval request not found or expired")
+        if session_id in session_manager._agents:
+            agent = session_manager._agents[session_id]
+            history = await agent.get_conversation_history()
+            return HistoryResponse(
+                session_id=session_id,
+                history=history,
+                total_count=len(history)
+            )
+        else:
+            return HistoryResponse(session_id=session_id, history=[], total_count=0)
 
-        # Get the agent for this session
-        session_id = approval_request.metadata.get("session_id")
-        if not session_id:
-            raise HTTPException(status_code=400, detail="Invalid approval request")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        agent = await session_manager.get_or_create_agent(session_id)
 
-        # Continue the workflow with human approval
-        result = await agent.handle_human_approval(
-            session_id,
-            response.approved,
-            response.feedback
-        )
-
-        return ChatResponse(
-            id=str(uuid.uuid4()),
-            success=result.get("success", True),
-            response_type=result.get("response_type", "generic"),
-            data=result.get("data"),
-            message=result.get("message", "Approval processed"),
-            ui_recommendations=result.get("ui_recommendations"),
-            session_id=session_id,
-            timestamp=datetime.now().isoformat()
-        )
+@app.delete("/api/history/{session_id}")
+async def clear_history(session_id: str):
+    """Clear conversation history for session"""
+    try:
+        if session_id in session_manager._agents:
+            agent = session_manager._agents[session_id]
+            await agent.clear_history()
+            return {"message": f"History cleared for session {session_id}"}
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Approval processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}", response_model=SessionInfoResponse)
+async def get_session_info(session_id: str):
+    """Get session information"""
+    try:
+        if session_id in session_manager._agents:
+            agent = session_manager._agents[session_id]
+            info = await agent.get_session_info()
+            return SessionInfoResponse(**info)
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/sessions/{session_id}")
+async def cleanup_session(session_id: str):
+    """Cleanup specific session"""
+    try:
+        success = await session_manager.cleanup_session(session_id)
+        if success:
+            return {"message": f"Session {session_id} cleaned up successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/sessions")
 async def list_sessions():
-    """List active sessions with statistics."""
+    """List all active sessions"""
     try:
-        stats = await session_manager.get_session_stats()
+        active_sessions = session_manager.get_active_sessions()
         return {
-            "success": True,
-            "data": stats,
+            "active_sessions": active_sessions,
+            "total_count": len(active_sessions),
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/sessions/{session_id}")
-async def terminate_session(session_id: str):
-    """Terminate a specific session."""
+@app.post("/api/sessions/cleanup")
+async def cleanup_inactive_sessions(max_age_hours: int = 2):
+    """Cleanup inactive sessions"""
     try:
-        async with session_manager._lock:
-            if session_id in session_manager._agents:
-                agent = session_manager._agents[session_id]
-                await agent.container.cleanup()
-                del session_manager._agents[session_id]
-                session_manager._session_activity.pop(session_id, None)
-
-                # Clean up related approvals
-                approvals_to_remove = [
-                    approval_id for approval_id, approval in session_manager._pending_approvals.items()
-                    if approval.metadata.get("session_id") == session_id
-                ]
-                for approval_id in approvals_to_remove:
-                    del session_manager._pending_approvals[approval_id]
-
-                return {"success": True, "message": f"Session {session_id} terminated"}
-            else:
-                raise HTTPException(status_code=404, detail="Session not found")
-
-    except HTTPException:
-        raise
+        cleaned_count = await session_manager.cleanup_inactive_sessions(max_age_hours)
+        return {
+            "message": f"Cleaned up {cleaned_count} inactive sessions",
+            "cleaned_sessions": cleaned_count
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/health")
-async def enhanced_health_check():
-    """Enhanced health check with system status."""
+async def health_check():
+    """Enhanced health check endpoint"""
     try:
-        stats = await session_manager.get_session_stats()
+        active_sessions = len(session_manager.get_active_sessions())
 
         return {
             "status": "healthy",
+            "active_sessions": active_sessions,
+            "version": "2.0.0",
             "timestamp": datetime.now().isoformat(),
-            "system": {
-                "active_sessions": stats["active_sessions"],
-                "pending_approvals": stats["pending_approvals"]
-            },
-            "version": "2.1.0"
+            "services": {
+                "session_manager": "operational",
+                "agent_factory": "operational"
+            }
         }
     except Exception as e:
         return {
@@ -374,6 +296,7 @@ async def enhanced_health_check():
         }
 
 
+# Run server
 if __name__ == "__main__":
     import uvicorn
 

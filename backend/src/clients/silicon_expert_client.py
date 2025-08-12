@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 import aiohttp
 
-from src.core.config import SiliconExpertConfig
+from config import SiliconExpertConfig
 
 
 @dataclass

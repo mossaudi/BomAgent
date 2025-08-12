@@ -1,47 +1,62 @@
-#!/usr/bin/env python3
+# ================================================================================================
+# run_server.py - Server Startup Script
+# ================================================================================================
+
+# !/usr/bin/env python3
 """
-Run script for the BOM Agent server.
-Handles proper path setup and server initialization.
+Simple server startup script with proper error handling
 """
 
-import os
+import asyncio
 import sys
+import uvicorn
 from pathlib import Path
 
-from src.core.config import AppConfig
+from config import AppConfig
 
-# Add the backend directory to Python path
-backend_dir = Path(__file__).parent.absolute()
-src_dir = backend_dir / "src"
+# Add project root to path
+project_root = Path(__file__).parent
+src_dir = project_root / "src"
 
-# Add both directories to path
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 if str(src_dir) not in sys.path:
     sys.path.insert(0, str(src_dir))
 
 
-# Now we can import and run the server
-if __name__ == "__main__":
-    import uvicorn
-    from server import app
+def main():
+    """Main entry point"""
+    try:
+        config = AppConfig.from_env()
+        validation_errors = config.validate()
 
-    config = AppConfig.from_env()
-    validation_errors = config.validate()
-    if validation_errors:
-        print("❌ Configuration errors:")
-        for error in validation_errors:
-            print(f"  - {error}")
+        if validation_errors:
+            print("❌ Configuration errors:")
+            for error in validation_errors:
+                print(f"  - {error}")
+            print("\n📝 Please check your .env file and ensure all required variables are set.")
+            sys.exit(1)
+
+        print("✅ Configuration validated successfully")
+        print(f"🔧 Debug mode: {'ON' if config.debug else 'OFF'}")
+        print("🚀 Starting BOM Agent server...")
+
+        # Run server
+        uvicorn.run(
+            "server:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=config.debug,
+            log_level="info" if not config.debug else "debug",
+            access_log=True
+        )
+
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped by user")
+    except Exception as e:
+        print(f"❌ Failed to start server: {e}")
         sys.exit(1)
 
-    print(f"Starting BOM Agent server from: {backend_dir}")
-    print(f"Python path includes: {[p for p in sys.path if 'backend' in p or 'BomAgent' in p]}")
 
-    # Run the server
-    uvicorn.run(
-        'server:app',
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        reload_dirs=[str(backend_dir)]
-    )
+if __name__ == "__main__":
+    main()

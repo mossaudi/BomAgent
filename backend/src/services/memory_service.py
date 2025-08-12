@@ -2,13 +2,11 @@
 """Modern memory service with clean interface."""
 
 import asyncio
-import pickle
-import threading
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-from src.models.state import ComponentData
+from main import ComponentData
 
 
 class MemoryService:

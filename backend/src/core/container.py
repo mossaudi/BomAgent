@@ -10,11 +10,12 @@ from typing import Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from src.clients.silicon_expert_client import SiliconExpertClient
-from src.core.config import AppConfig
 from src.services.bom_service import BOMService
 from src.services.component_service import ComponentService
 from src.services.memory_service import MemoryService
 from src.services.schematic_service import SchematicService
+
+from config import AppConfig
 
 
 @dataclass
