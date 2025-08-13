@@ -46,12 +46,12 @@ class ComponentService:
                 # Create enhanced component
                 component = ComponentData(
                     name=comp_data.get('name', ''),
-                    part_number=search_result.get('part_number') or comp_data.get('part_number'),
-                    manufacturer=search_result.get('manufacturer') or comp_data.get('manufacturer'),
-                    description=search_result.get('description') or comp_data.get('description'),
+                    part_number=search_result.part_number or comp_data.get('part_number'),
+                    manufacturer=search_result.manufacturer or comp_data.get('manufacturer'),
+                    description=search_result.description or comp_data.get('description'),
                     value=comp_data.get('value'),
                     designator=comp_data.get('designator'),
-                    confidence=search_result.get('confidence', comp_data.get('confidence', 0.5)),
+                    confidence=search_result.confidence or comp_data.get('confidence', 0.5),
                     metadata={
                         'enhanced': True,
                         'original_data': comp_data,

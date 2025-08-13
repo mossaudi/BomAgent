@@ -7,6 +7,7 @@ from datetime import datetime
 from src.clients.silicon_expert_client import SiliconExpertClient
 from src.services.memory_service import MemoryService
 from src.core.models import BOMData
+from src.core.models import ComponentData
 
 
 class BOMService:
@@ -59,18 +60,18 @@ class BOMService:
                 "name": name
             }
 
-    async def add_parts(self, bom_name: str, project: str, parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def add_parts(self, bom_name: str, project: str, parts: List[ComponentData]) -> Dict[str, Any]:
         """Add parts to existing BOM."""
         try:
             # Convert parts to Silicon Expert format
             se_parts = []
             for part in parts:
                 se_part = {
-                    "mpn": part.get("part_number", "Unknown"),
-                    "manufacturer": part.get("manufacturer", "Unknown"),
-                    "description": part.get("description", ""),
-                    "quantity": str(part.get("quantity", 1)),
-                    "designator": part.get("designator", "")
+                    "mpn": part.part_number or "Unknown",
+                    "manufacturer": part.manufacturer or "Unknown",
+                    "description": part.description or "",
+                    "quantity": 1,
+                    "designator": part.designator or ""
                 }
                 se_parts.append(se_part)
 

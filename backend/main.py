@@ -1,82 +1,51 @@
-# clean_bom_agent.py - Professional ReAct Agent Implementation
+# optimized_bom_agent.py - Clean ReAct Agent Implementation
 """
-Clean, professional ReAct agent with proper separation of concerns:
-1. Agent returns structured data, not UI formatting
-2. Tools are simple and focused
-3. Dynamic tool registration system
-4. Proper async/await handling
-5. Clean error handling and validation
+Optimized ReAct agent addressing all identified issues:
+1. Clean code architecture with proper separation of concerns
+2. Single source of truth for models and services
+3. Dynamic tool system with clear parameter definitions
+4. Fixed tool execution issues
+5. Simplified and maintainable codebase
 """
 
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Optional, Literal, Union
+from typing import Dict, Any, List, Optional, Literal
 from datetime import datetime
 from urllib.parse import urlparse
-from dotmap import DotMap
+from abc import ABC, abstractmethod
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from src.clients.silicon_expert_client import SiliconExpertClient
+from src.core.models import ComponentData
+from src.services.bom_service import BOMService
+from src.services.component_service import ComponentService
+from src.services.schematic_service import SchematicService
 
 
 # =============================================================================
-# Core Data Models
+# Core Models - Single Source of Truth
 # =============================================================================
 
-@dataclass
-class ComponentData:
-    """Clean component data structure"""
-    id: str
-    name: str
-    part_number: Optional[str] = None
-    manufacturer: Optional[str] = None
-    description: Optional[str] = None
-    value: Optional[str] = None
-    designator: Optional[str] = None
-    confidence: float = 0.0
-    enhanced: bool = False
-    category: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class AnalysisResult:
-    """Schematic analysis result"""
-    success: bool
-    components: List[ComponentData]
-    total_found: int
-    enhanced_count: int
-    analysis_url: str
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "success": self.success,
-            "components": [comp.to_dict() for comp in self.components],
-            "total_found": self.total_found,
-            "enhanced_count": self.enhanced_count,
-            "enhancement_rate": (self.enhanced_count / self.total_found * 100) if self.total_found > 0 else 0,
-            "analysis_url": self.analysis_url,
-            "error": self.error
-        }
 
 
 @dataclass
 class AgentResponse:
-    """Standardized agent response for UI consumption"""
+    """Single response model for all operations"""
     success: bool
     action: str
-    data: Optional[Dict[str, Any]] = None
     message: str = ""
+    data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-    timestamp: str = None
+    timestamp: str = ""
 
     def __post_init__(self):
         if not self.timestamp:
@@ -86,235 +55,203 @@ class AgentResponse:
         return asdict(self)
 
 
-# =============================================================================
-# Agent State Management
-# =============================================================================
-
-class AgentState(BaseModel):
-    """LangGraph state with proper typing"""
-    messages: List[Any] = []
-    session_id: str
-    stored_components: List[ComponentData] = []
-    last_analysis_url: Optional[str] = None
-    conversation_history: List[Dict[str, Any]] = []
-
+@dataclass
+class SearchResult:
+    """Search result model"""
+    success: bool
+    part_number: Optional[str] = None
+    manufacturer: Optional[str] = None
+    description: Optional[str] = None
+    lifecycle: Optional[str] = None
+    confidence: float = 0.0
+    error_message: Optional[str] = None
 
 # =============================================================================
-# Clean Tool Implementations
+# Tool System - Fixed and Enhanced
 # =============================================================================
 
-class BaseTool:
-    """Base class for all tools with consistent interface"""
+class SchematicAnalysisInput(BaseModel):
+    """Input schema for schematic analysis tool"""
+    image_url: str = Field(description="Valid HTTP/HTTPS URL to schematic image")
+
+
+class ComponentSearchInput(BaseModel):
+    """Input schema for component search tool"""
+    query: str = Field(description="Component name, part number, or description to search for")
+
+
+class BOMCreateInput(BaseModel):
+    """Input schema for BOM creation tool"""
+    name: str = Field(description="BOM name (required)")
+    project: str = Field(default="", description="Project name (optional)")
+    description: str = Field(default="", description="BOM description (optional)")
+
+
+class BOMAddInput(BaseModel):
+    """Input schema for adding components to BOM"""
+    bom_name: str = Field(description="Name of the BOM to add components to")
+
+
+class AgentTool(ABC):
+    """Base class for all agent tools"""
 
     def __init__(self, agent: 'BOMAgent'):
         self.agent = agent
 
-    def validate_input(self, **kwargs) -> tuple[bool, Optional[str]]:
-        """Validate tool input. Override in subclasses."""
-        return True, None
+    @abstractmethod
+    async def execute(self, **kwargs) -> AgentResponse:
+        """Execute the tool with given parameters"""
+        pass
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Tool name for registration"""
+        pass
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """Tool description for LLM"""
+        pass
+
+    @property
+    @abstractmethod
+    def args_schema(self):
+        """Tool argument schema"""
+        pass
 
 
-class SchematicAnalysisTool(BaseTool):
-    """Clean schematic analysis tool"""
+class SchematicAnalysisTool(AgentTool):
+    """Tool for analyzing schematics with proper schema"""
 
-    @tool
-    async def analyze_schematic(self, image_url: str) -> Dict[str, Any]:
-        """
-        Analyze electronic schematic from image URL.
-        Returns structured component data for UI rendering.
+    @property
+    def name(self) -> str:
+        return "analyze_schematic"
 
-        Args:
-            image_url: Public HTTP/HTTPS URL to schematic image
+    @property
+    def description(self) -> str:
+        return """Analyze electronic schematic from image URL and extract all visible components.
 
-        Returns:
-            Analysis result with components and metadata
-        """
+        Input: image_url (string) - Valid HTTP/HTTPS URL to schematic image
+        Output: List of components with enhanced details from Silicon Expert database
+
+        Example: analyze_schematic(image_url="https://example.com/schematic.png")"""
+
+    @property
+    def args_schema(self):
+        return SchematicAnalysisInput
+
+    async def execute(self, image_url: str) -> AgentResponse:
+        """Execute schematic analysis with proper parameter handling"""
         # Validate URL
-        is_valid, error = self._validate_url(image_url)
-        if not is_valid:
+        if not self._is_valid_url(image_url):
             return AgentResponse(
                 success=False,
-                action="analyze_schematic",
-                error=error
-            ).to_dict()
+                action=self.name,
+                error="Invalid URL format. Must be http:// or https://",
+                message="Please provide a valid HTTP/HTTPS URL to your schematic image."
+            )
 
         try:
-            # Perform analysis
-            result = await self._analyze_schematic(image_url)
+            # Analyze schematic
+            analysis_result = await self.agent.schematic_service.analyze(image_url)
 
-            # Store components in agent state
-            await self.agent.store_components(result.components)
+            if not analysis_result.get('components'):
+                return AgentResponse(
+                    success=False,
+                    action=self.name,
+                    error="No components found in schematic",
+                    message="No components could be extracted from the schematic image."
+                )
+
+            # Convert to ComponentData objects
+            components = []
+            for comp_data in analysis_result['components']:
+                component = ComponentData(
+                    name=comp_data.get('name', 'Unknown'),
+                    part_number=comp_data.get('part_number'),
+                    manufacturer=comp_data.get('manufacturer'),
+                    description=comp_data.get('description', ''),
+                    value=comp_data.get('value'),
+                    designator=comp_data.get('designator'),
+                    confidence=float(comp_data.get('confidence', 0.5)),
+                    category=comp_data.get('category', 'other')
+                )
+                components.append(component)
+
+            # Auto-enhance components
+            enhanced_components = await self.agent.component_service.search_and_enhance(components)
+
+            # Store components
+            self.agent._stored_components = enhanced_components
+
+            enhanced_count = sum(1 for comp in enhanced_components if comp.enhanced)
 
             return AgentResponse(
                 success=True,
-                action="analyze_schematic",
-                data=result.to_dict(),
-                message=f"Successfully analyzed schematic. Found {result.total_found} components, enhanced {result.enhanced_count}"
-            ).to_dict()
+                action=self.name,
+                message=f"Successfully analyzed schematic. Found {len(enhanced_components)} components, enhanced {enhanced_count} with Silicon Expert data.",
+                data={
+                    "components": [comp.to_dict() for comp in enhanced_components],
+                    "total_found": len(enhanced_components),
+                    "enhanced_count": enhanced_count,
+                    "enhancement_rate": (enhanced_count / len(enhanced_components) * 100) if enhanced_components else 0
+                }
+            )
 
         except Exception as e:
             return AgentResponse(
                 success=False,
-                action="analyze_schematic",
-                error=str(e)
-            ).to_dict()
+                action=self.name,
+                error=str(e),
+                message=f"Schematic analysis failed: {str(e)}"
+            )
 
-    def _validate_url(self, url: str) -> tuple[bool, Optional[str]]:
-        """Validate image URL format"""
+    def _is_valid_url(self, url: str) -> bool:
+        """Validate URL format"""
         try:
             result = urlparse(url)
-            if not all([result.scheme in ['http', 'https'], result.netloc, result.path]):
-                return False, "Invalid URL format. Must be http:// or https://"
-            return True, None
+            return all([result.scheme in ['http', 'https'], result.netloc, result.path])
         except:
-            return False, "Invalid URL format"
+            return False
 
-    async def _analyze_schematic(self, image_url: str) -> AnalysisResult:
-        """Core analysis logic"""
-        # Get raw analysis from LLM
-        raw_result = await self.agent.schematic_service.analyze(image_url)
 
-        if not raw_result.get('components'):
-            return AnalysisResult(
+class ComponentSearchTool(AgentTool):
+    """Tool for searching components"""
+
+    @property
+    def name(self) -> str:
+        return "search_component"
+
+    @property
+    def description(self) -> str:
+        return """Search for electronic component by name or part number using Silicon Expert database.
+
+        Input: query (string) - Component name, part number, or description
+        Output: Component details including part number, manufacturer, description, lifecycle
+
+        Example: search_component(query="LM358")"""
+
+    @property
+    def args_schema(self):
+        return ComponentSearchInput
+
+    async def execute(self, query: str) -> AgentResponse:
+        """Execute component search"""
+        if not query or not query.strip():
+            return AgentResponse(
                 success=False,
-                components=[],
-                total_found=0,
-                enhanced_count=0,
-                analysis_url=image_url,
-                error="No components found in schematic"
+                action=self.name,
+                error="Search query cannot be empty",
+                message="Please provide a component name or part number to search for."
             )
 
-        # Convert to ComponentData objects
-        raw_components = []
-        for comp_data in raw_result['components']:
-            component = ComponentData(
-                id=str(uuid.uuid4()),
-                name=comp_data.get('name', 'Unknown'),
-                part_number=comp_data.get('part_number'),
-                manufacturer=comp_data.get('manufacturer'),
-                description=comp_data.get('description', ''),
-                value=comp_data.get('value'),
-                designator=comp_data.get('designator'),
-                confidence=float(comp_data.get('confidence', 0.5)),
-                category=comp_data.get('category', 'other')
-            )
-            raw_components.append(component)
-
-        # Auto-enhance with Silicon Expert
-        enhanced_components = await self._enhance_components(raw_components)
-
-        enhanced_count = sum(1 for comp in enhanced_components if comp.enhanced)
-
-        return AnalysisResult(
-            success=True,
-            components=enhanced_components,
-            total_found=len(enhanced_components),
-            enhanced_count=enhanced_count,
-            analysis_url=image_url
-        )
-
-    async def _enhance_components(self, components: List[ComponentData]) -> List[ComponentData]:
-        """Enhance components with Silicon Expert data"""
-        enhanced = []
-
-        for component in components:
-            try:
-                # Search Silicon Expert
-                search_data = {
-                    "name": component.name,
-                    "part_number": component.part_number,
-                    "manufacturer": component.manufacturer,
-                    "description": component.description
-                }
-
-                search_result = await self.agent.silicon_expert_client.search_component(search_data)
-
-                if search_result.success and search_result.part_number:
-                    # Create enhanced component
-                    enhanced_comp = ComponentData(
-                        id=component.id,
-                        name=component.name,
-                        part_number=search_result.part_number,
-                        manufacturer=search_result.manufacturer or component.manufacturer,
-                        description=search_result.description or component.description,
-                        value=component.value,
-                        designator=component.designator,
-                        confidence=max(component.confidence, search_result.confidence),
-                        enhanced=True,
-                        category=component.category
-                    )
-                    enhanced.append(enhanced_comp)
-                else:
-                    # Keep original data
-                    component.enhanced = False
-                    enhanced.append(component)
-
-            except Exception as e:
-                # Fallback to original on error
-                component.enhanced = False
-                enhanced.append(component)
-
-        return enhanced
-
-
-class ComponentManagementTool(BaseTool):
-    """Component management operations"""
-
-    @tool
-    async def get_stored_components(self) -> Dict[str, Any]:
-        """
-        Get all stored components from analysis.
-        Returns structured data for UI table rendering.
-        """
         try:
-            components = await self.agent.get_stored_components()
+            search_data = {"name": query.strip(), "description": query.strip()}
+            result_list  = await self.agent.component_service.search_and_enhance([search_data])
 
-            if not components:
-                return AgentResponse(
-                    success=True,
-                    action="get_components",
-                    data={"components": [], "total_count": 0},
-                    message="No components available. Please analyze a schematic first."
-                ).to_dict()
-
-            enhanced_count = sum(1 for comp in components if comp.enhanced)
-
-            return AgentResponse(
-                success=True,
-                action="get_components",
-                data={
-                    "components": [comp.to_dict() for comp in components],
-                    "total_count": len(components),
-                    "enhanced_count": enhanced_count,
-                    "enhancement_rate": (enhanced_count / len(components) * 100) if components else 0
-                },
-                message=f"Retrieved {len(components)} components ({enhanced_count} enhanced)"
-            ).to_dict()
-
-        except Exception as e:
-            return AgentResponse(
-                success=False,
-                action="get_components",
-                error=str(e)
-            ).to_dict()
-
-    @tool
-    async def search_component(self, query: str) -> Dict[str, Any]:
-        """
-        Search for component by name or part number.
-        Returns component details from Silicon Expert.
-        """
-        if not query.strip():
-            return AgentResponse(
-                success=False,
-                action="search_component",
-                error="Search query cannot be empty"
-            ).to_dict()
-
-        try:
-            search_data = {"name": query, "description": query}
-            result = await self.agent.silicon_expert_client.search_component(search_data)
-
+            result = result_list[0] or {}
             if result.success and result.part_number:
                 component_data = {
                     "part_number": result.part_number,
@@ -326,41 +263,60 @@ class ComponentManagementTool(BaseTool):
 
                 return AgentResponse(
                     success=True,
-                    action="search_component",
-                    data={"component": component_data, "query": query},
-                    message=f"Found component: {result.part_number}"
-                ).to_dict()
+                    action=self.name,
+                    message=f"Found component: {result.part_number} by {result.manufacturer}",
+                    data={"component": component_data, "query": query}
+                )
             else:
                 return AgentResponse(
                     success=True,
-                    action="search_component",
-                    data={"component": None, "query": query},
-                    message=f"No component found for '{query}'"
-                ).to_dict()
+                    action=self.name,
+                    message=f"No matching component found for '{query}'",
+                    data={"component": None, "query": query}
+                )
 
         except Exception as e:
             return AgentResponse(
                 success=False,
-                action="search_component",
-                error=str(e)
-            ).to_dict()
+                action=self.name,
+                error=str(e),
+                message=f"Component search failed: {str(e)}"
+            )
 
 
-class BOMManagementTool(BaseTool):
-    """BOM management operations"""
+class BOMCreateTool(AgentTool):
+    """Tool for creating BOMs"""
 
-    @tool
-    async def create_bom(self, name: str, project: str = "", description: str = "") -> Dict[str, Any]:
-        """
-        Create a new Bill of Materials.
-        Returns BOM creation status and details.
-        """
-        if not name.strip():
+    @property
+    def name(self) -> str:
+        return "create_bom"
+
+    @property
+    def description(self) -> str:
+        return """Create a new Bill of Materials (BOM) in Silicon Expert.
+
+        Input: 
+        - name (string, required) - BOM name
+        - project (string, optional) - Project name  
+        - description (string, optional) - BOM description
+
+        Output: Confirmation of BOM creation with available components count
+
+        Example: create_bom(name="Arduino Shield", project="IoT Device", description="Main PCB BOM")"""
+
+    @property
+    def args_schema(self):
+        return BOMCreateInput
+
+    async def execute(self, name: str, project: str = "", description: str = "") -> AgentResponse:
+        """Execute BOM creation"""
+        if not name or not name.strip():
             return AgentResponse(
                 success=False,
-                action="create_bom",
-                error="BOM name is required"
-            ).to_dict()
+                action=self.name,
+                error="BOM name is required",
+                message="Please provide a name for the BOM."
+            )
 
         try:
             result = await self.agent.bom_service.create_bom(
@@ -370,197 +326,187 @@ class BOMManagementTool(BaseTool):
             )
 
             if result.get('success'):
-                components = await self.agent.get_stored_components()
+                components_count = len(self.agent.stored_components)
 
                 return AgentResponse(
                     success=True,
-                    action="create_bom",
+                    action=self.name,
+                    message=f"BOM '{name}' created successfully. {components_count} components available to add.",
                     data={
                         "bom_name": name,
                         "project": project,
                         "description": description,
-                        "available_components": len(components),
-                        "api_response": result
-                    },
-                    message=f"BOM '{name}' created successfully"
-                ).to_dict()
+                        "available_components": components_count
+                    }
+                )
             else:
                 return AgentResponse(
                     success=False,
-                    action="create_bom",
-                    error=result.get('error', 'Unknown error')
-                ).to_dict()
+                    action=self.name,
+                    error=result.get('error', 'Unknown error'),
+                    message=f"Failed to create BOM '{name}'"
+                )
 
         except Exception as e:
             return AgentResponse(
                 success=False,
-                action="create_bom",
-                error=str(e)
-            ).to_dict()
+                action=self.name,
+                error=str(e),
+                message=f"BOM creation failed: {str(e)}"
+            )
 
-    @tool
-    async def add_components_to_bom(self, bom_name: str) -> Dict[str, Any]:
-        """
-        Add all stored components to existing BOM.
-        Returns operation status and component details.
-        """
-        if not bom_name.strip():
+
+class BOMAddComponentsTool(AgentTool):
+    """Tool for adding components to BOM"""
+
+    @property
+    def name(self) -> str:
+        return "add_components_to_bom"
+
+    @property
+    def description(self) -> str:
+        return """Add all stored components to an existing BOM.
+
+        Input: bom_name (string) - Name of the BOM to add components to
+        Output: Confirmation of components added to BOM
+
+        Example: add_components_to_bom(bom_name="Arduino Shield")
+
+        Note: Components must be analyzed first using analyze_schematic"""
+
+    @property
+    def args_schema(self):
+        return BOMAddInput
+
+    async def execute(self, bom_name: str) -> AgentResponse:
+        """Execute adding components to BOM"""
+        if not bom_name or not bom_name.strip():
             return AgentResponse(
                 success=False,
-                action="add_components_to_bom",
-                error="BOM name is required"
-            ).to_dict()
+                action=self.name,
+                error="BOM name is required",
+                message="Please provide the name of the BOM to add components to."
+            )
+
+        if not self.agent.stored_components:
+            return AgentResponse(
+                success=False,
+                action=self.name,
+                error="No components available",
+                message="No components found. Please analyze a schematic first using analyze_schematic."
+            )
 
         try:
-            components = await self.agent.get_stored_components()
-
-            if not components:
-                return AgentResponse(
-                    success=False,
-                    action="add_components_to_bom",
-                    error="No components available. Please analyze a schematic first."
-                ).to_dict()
-
-            # Convert to BOM format
-            parts_data = []
-            for comp in components:
-                part = {
-                    "part_number": comp.part_number or comp.designator or "Unknown",
-                    "manufacturer": comp.manufacturer or "Unknown",
-                    "description": f"{comp.name} - {comp.description or comp.value or ''}".strip(" - "),
-                    "quantity": "1",
-                    "designator": comp.designator or ""
-                }
-                parts_data.append(part)
-
-            result = await self.agent.bom_service.add_parts(bom_name.strip(), "", parts_data)
+            result = await self.agent.bom_service.add_parts(
+                bom_name.strip(),
+                '',
+                parts=self.agent.stored_components
+            )
 
             if result.get('success'):
-                enhanced_count = sum(1 for comp in components if comp.enhanced)
+                enhanced_count = sum(1 for comp in self.agent.stored_components if comp.enhanced)
 
                 return AgentResponse(
                     success=True,
-                    action="add_components_to_bom",
+                    action=self.name,
+                    message=f"Successfully added {len(self.agent.stored_components)} components to BOM '{bom_name}' ({enhanced_count} enhanced).",
                     data={
                         "bom_name": bom_name,
-                        "total_components": len(components),
-                        "enhanced_components": enhanced_count,
-                        "original_components": len(components) - enhanced_count,
-                        "api_response": result
-                    },
-                    message=f"Added {len(components)} components to '{bom_name}'"
-                ).to_dict()
+                        "components_added": len(self.agent.stored_components),
+                        "enhanced_count": enhanced_count
+                    }
+                )
             else:
                 return AgentResponse(
                     success=False,
-                    action="add_components_to_bom",
-                    error=result.get('error', 'Unknown error')
-                ).to_dict()
+                    action=self.name,
+                    error=result.get('error', 'Unknown error'),
+                    message=f"Failed to add components to BOM '{bom_name}'"
+                )
 
         except Exception as e:
             return AgentResponse(
                 success=False,
-                action="add_components_to_bom",
-                error=str(e)
-            ).to_dict()
+                action=self.name,
+                error=str(e),
+                message=f"Adding components to BOM failed: {str(e)}"
+            )
 
-    @tool
-    async def list_boms(self, project_filter: str = "") -> Dict[str, Any]:
-        """
-        List all existing BOMs with optional project filter.
-        Returns BOM list for UI rendering.
-        """
-        try:
-            result = await self.agent.bom_service.get_boms(project_filter)
-
-            if result.get('success'):
-                boms = result.get('boms', [])
-                components = await self.agent.get_stored_components()
-
-                return AgentResponse(
-                    success=True,
-                    action="list_boms",
-                    data={
-                        "boms": boms,
-                        "total_boms": len(boms),
-                        "available_components": len(components),
-                        "project_filter": project_filter
-                    },
-                    message=f"Retrieved {len(boms)} BOMs"
-                ).to_dict()
-            else:
-                return AgentResponse(
-                    success=False,
-                    action="list_boms",
-                    error=result.get('error', 'Unknown error')
-                ).to_dict()
-
-        except Exception as e:
-            return AgentResponse(
-                success=False,
-                action="list_boms",
-                error=str(e)
-            ).to_dict()
-
-
-# =============================================================================
-# Dynamic Tool Registry
-# =============================================================================
 
 class ToolRegistry:
-    """Dynamic tool registration system"""
+    """Dynamic tool registry with proper LangChain integration"""
 
     def __init__(self, agent: 'BOMAgent'):
         self.agent = agent
-        self._tools = {}
-        self._tool_instances = {}
+        self.tools: Dict[str, AgentTool] = {}
         self._register_default_tools()
 
     def _register_default_tools(self):
         """Register default tools"""
-        self.register_tool_class("schematic", SchematicAnalysisTool)
-        self.register_tool_class("component", ComponentManagementTool)
-        self.register_tool_class("bom", BOMManagementTool)
+        self.register_tool(SchematicAnalysisTool)
+        self.register_tool(ComponentSearchTool)
+        self.register_tool(BOMCreateTool)
+        self.register_tool(BOMAddComponentsTool)
 
-    def register_tool_class(self, category: str, tool_class: type):
-        """Register a tool class for dynamic instantiation"""
-        self._tools[category] = tool_class
+    def register_tool(self, tool_class: type):
+        """Register a new tool dynamically"""
+        tool_instance = tool_class(self.agent)
+        self.tools[tool_instance.name] = tool_instance
 
-    def get_all_tools(self) -> List:
-        """Get all registered tool functions"""
-        tools = []
+    def get_tools_for_llm(self) -> List:
+        """Get tools formatted for LangChain with proper schemas"""
+        llm_tools = []
 
-        for category, tool_class in self._tools.items():
-            if category not in self._tool_instances:
-                self._tool_instances[category] = tool_class(self.agent)
+        for tool_name, tool_instance in self.tools.items():
+            @tool(
+                name_or_callable=tool_name,
+                description=tool_instance.description,
+                args_schema=tool_instance.args_schema
+            )
+            async def tool_wrapper(**kwargs):
+                # This creates a closure that captures the tool_instance
+                return await tool_instance.execute(**kwargs)
 
-            instance = self._tool_instances[category]
+            # Store reference to original tool for execution
+            tool_wrapper._tool_instance = tool_instance
+            llm_tools.append(tool_wrapper)
 
-            # Get all methods decorated with @tool
-            for attr_name in dir(instance):
-                attr = getattr(instance, attr_name)
-                if hasattr(attr, 'name') and hasattr(attr, 'description'):
-                    tools.append(attr)
+        return llm_tools
 
-        return tools
-
-    def add_custom_tool(self, tool_func):
-        """Add a custom tool function at runtime"""
-        # This allows for dynamic tool addition
-        return tool_func
+    async def execute_tool(self, tool_name: str, **kwargs) -> AgentResponse:
+        """Execute a tool by name"""
+        if tool_name in self.tools:
+            return await self.tools[tool_name].execute(**kwargs)
+        else:
+            return AgentResponse(
+                success=False,
+                action=tool_name,
+                error=f"Tool '{tool_name}' not found"
+            )
 
 
 # =============================================================================
-# Clean ReAct Agent
+# Agent State for LangGraph
+# =============================================================================
+
+class AgentState(BaseModel):
+    """Clean agent state"""
+    messages: List[Any] = []
+    session_id: str
+    stored_components: List[Dict[str, Any]] = []
+    last_response: Optional[Dict[str, Any]] = None
+
+
+# =============================================================================
+# Main Agent - Optimized and Clean
 # =============================================================================
 
 class BOMAgent:
-    """Professional ReAct agent for BOM management"""
+    """Optimized, clean BOM agent with proper ReAct implementation"""
 
     def __init__(self, config, session_id: str = None):
         self.config = config
         self.session_id = session_id or str(uuid.uuid4())
-        self.conversation_history: List[Dict[str, Any]] = []
 
         # Initialize LLM
         self.llm = ChatGoogleGenerativeAI(
@@ -572,30 +518,44 @@ class BOMAgent:
 
         # Component storage
         self._stored_components: List[ComponentData] = []
+        self.conversation_history: List[Dict[str, Any]] = []
 
-        # Services (injected or created)
-        self.schematic_service = None
-        self.component_service = None
-        self.bom_service = None
-        self.silicon_expert_client = None
+        # Services (will be initialized in initialize())
+        self.silicon_expert_client:SiliconExpertClient = None
+        self.schematic_service:SchematicService = None
+        self.component_service:ComponentService = None
+        self.bom_service:BOMService = None
 
         # Tool registry
-        self.tool_registry = ToolRegistry(self)
+        self.tool_registry = None
 
-        # LangGraph setup
+        # LangGraph
         self.graph = None
-        self._build_graph()
 
     async def initialize(self) -> None:
-        """Initialize agent services"""
-        # Initialize services here
-        # This method now exists for server.py compatibility
-        pass
+        """Initialize all services"""
+        try:
 
-    async def cleanup(self) -> None:
-        """Cleanup resources"""
-        if self.silicon_expert_client:
-            await self.silicon_expert_client.close()
+            # Initialize Silicon Expert client
+            self.silicon_expert_client = SiliconExpertClient(self.config.silicon_expert)
+            await self.silicon_expert_client.authenticate()
+
+            # Initialize services
+            self.schematic_service = SchematicService(self.llm)
+            self.component_service = ComponentService()
+            self.bom_service = BOMService()
+
+            # Initialize tool registry
+            self.tool_registry = ToolRegistry(self)
+
+            # Build LangGraph workflow
+            self._build_graph()
+
+            print(f"✅ Optimized Agent initialized successfully for session {self.session_id}")
+
+        except Exception as e:
+            print(f"❌ Agent initialization failed: {str(e)}")
+            raise
 
     def _build_graph(self):
         """Build the ReAct workflow graph"""
@@ -622,86 +582,104 @@ class BOMAgent:
 
     async def _agent_node(self, state: AgentState) -> AgentState:
         """Main reasoning node"""
-        system_msg = SystemMessage(content=f"""You are a professional electronic design BOM assistant.
+        system_msg = SystemMessage(content=f"""You are a professional electronic design BOM assistant with advanced schematic analysis capabilities.
 
 **Your Capabilities:**
-- Analyze electronic schematics and extract components
-- Search for component specifications using Silicon Expert
-- Create and manage Bills of Materials (BOMs)
-
-**Available Tools:**
-{self._get_tool_descriptions()}
+- analyze_schematic: Analyze electronic schematics and extract components with Silicon Expert enhancement
+- search_component: Search for component specifications in Silicon Expert database
+- create_bom: Create and manage Bills of Materials
+- add_components_to_bom: Add analyzed components to existing BOMs
 
 **Current Context:**
 - Session: {state.session_id}
 - Stored Components: {len(state.stored_components)} available
 
 **Instructions:**
-1. For schematic analysis: extract URL and use analyze_schematic tool
-2. Always return structured data, not formatted text
-3. Chain tools when appropriate
-4. Be helpful and provide clear responses
-5. Use tool calls in proper JSON format when needed
+1. For schematic analysis: Use analyze_schematic with the exact image URL
+2. Always use proper tool parameter names (image_url, query, name, bom_name)
+3. Chain tools when appropriate (analyze → create_bom → add_components_to_bom)
+4. Provide helpful and structured responses
+5. When users provide URLs, use them directly in the analyze_schematic tool
 
-Focus on understanding intent and providing structured responses.""")
+**Tool Parameters:**
+- analyze_schematic(image_url="https://...")
+- search_component(query="component_name") 
+- create_bom(name="BOM_Name", project="Project", description="Description")
+- add_components_to_bom(bom_name="BOM_Name")
+
+Focus on understanding user intent and providing accurate technical assistance.""")
 
         # Prepare messages
         messages = state.messages.copy()
         if not messages or not isinstance(messages[0], SystemMessage):
             messages.insert(0, system_msg)
 
-        # Get LLM response
-        agent = self.llm.bind_tools(self.tool_registry.get_all_tools())
+        # Get LLM response with tools
+        agent = self.llm.bind_tools(self.tool_registry.get_tools_for_llm())
         response = await agent.ainvoke(messages)
 
         # Update state
-        new_state = state.copy()
+        new_state = state.model_copy()
         new_state.messages = messages + [response]
 
         return new_state
 
     async def _tool_node(self, state: AgentState) -> AgentState:
-        """Execute tool calls"""
+        """Execute tool calls with proper error handling"""
         last_message = state.messages[-1]
 
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             results = []
+
             for tool_call in last_message.tool_calls:
                 result = await self._execute_tool_call(tool_call)
                 results.append(result)
 
-            # Update state with results
-            new_state = state.copy()
+                # Update stored components if this was a schematic analysis
+                if (tool_call['name'] == 'analyze_schematic' and
+                        result.get('success') and
+                        result.get('data', {}).get('components')):
+                    components_data = result['data']['components']
+                    state.stored_components = components_data
+
+            new_state = state.model_copy()
+            new_state.last_response = results[-1] if results else None
+
+            # Add tool results to messages
             for result in results:
-                new_state.messages.append(AIMessage(content=str(result)))
+                new_state.messages.append(AIMessage(content=json.dumps(result, indent=2)))
 
             return new_state
 
         return state
 
     async def _execute_tool_call(self, tool_call) -> Dict[str, Any]:
-        """Execute a specific tool call"""
+        """Execute a specific tool call with proper parameter handling"""
         tool_name = tool_call['name']
         tool_args = tool_call.get('args', {})
 
-        # Find and execute tool
-        for tool in self.tool_registry.get_all_tools():
-            if tool.name == tool_name:
-                try:
-                    result = await tool.func(**tool_args)
-                    return result
-                except Exception as e:
-                    return {
-                        "success": False,
-                        "action": tool_name,
-                        "error": str(e)
-                    }
+        try:
+            # Get the tool instance
+            if tool_name in self.tool_registry.tools:
+                tool_instance = self.tool_registry.tools[tool_name]
 
-        return {
-            "success": False,
-            "action": tool_name,
-            "error": f"Tool '{tool_name}' not found"
-        }
+                # Execute with proper parameter unpacking
+                result = await tool_instance.execute(**tool_args)
+                return result.to_dict()
+            else:
+                return AgentResponse(
+                    success=False,
+                    action=tool_name,
+                    error=f"Tool '{tool_name}' not found"
+                ).to_dict()
+
+        except Exception as e:
+            return AgentResponse(
+                success=False,
+                action=tool_name,
+                error=str(e),
+                message=f"Tool execution failed: {str(e)}"
+            ).to_dict()
 
     def _should_continue(self, state: AgentState) -> Literal["continue", "end"]:
         """Determine if workflow should continue"""
@@ -710,14 +688,8 @@ Focus on understanding intent and providing structured responses.""")
             return "continue"
         return "end"
 
-    def _get_tool_descriptions(self) -> str:
-        """Get formatted tool descriptions"""
-        tools = self.tool_registry.get_all_tools()
-        descriptions = [f"- {tool.name}: {tool.description}" for tool in tools]
-        return "\n".join(descriptions)
-
     # =============================================================================
-    # Public Interface Methods (for server.py compatibility)
+    # Public Interface Methods
     # =============================================================================
 
     async def process_request(self, message: str) -> AgentResponse:
@@ -727,17 +699,19 @@ Focus on understanding intent and providing structured responses.""")
             initial_state = AgentState(
                 messages=[HumanMessage(content=message)],
                 session_id=self.session_id,
-                stored_components=self._stored_components
+                stored_components=[comp.to_dict() for comp in self._stored_components]
             )
 
             # Run workflow
             config = {"configurable": {"thread_id": self.session_id}}
             final_state = await self.graph.ainvoke(initial_state, config)
 
-            final_state = DotMap(final_state)
-
             # Update stored components
-            self._stored_components = final_state.stored_components
+            if final_state.get('stored_components'):
+                self._stored_components = [
+                    ComponentData.from_dict(comp_data)
+                    for comp_data in final_state['stored_components']
+                ]
 
             # Add to conversation history
             self.conversation_history.append({
@@ -746,41 +720,45 @@ Focus on understanding intent and providing structured responses.""")
                 "timestamp": datetime.now().isoformat()
             })
 
-            # Extract final response
-            if final_state.messages:
-                last_message = final_state.messages[-1]
-                if isinstance(last_message, AIMessage):
-                    response_content = last_message.content
+            # Extract and return final response
+            if final_state.get('last_response'):
+                response_data = final_state['last_response']
+                self.conversation_history.append({
+                    "type": "assistant",
+                    "content": response_data,
+                    "timestamp": datetime.now().isoformat()
+                })
 
-                    # Add to conversation history
-                    self.conversation_history.append({
-                        "type": "assistant",
-                        "content": response_content,
-                        "timestamp": datetime.now().isoformat()
-                    })
+                return AgentResponse(**response_data)
+            else:
+                # Generate helpful response based on last message
+                last_ai_message = None
+                for msg in reversed(final_state.get('messages') or []):
+                    if isinstance(msg, AIMessage):
+                        last_ai_message = msg
+                        break
 
-                    # Try to parse as structured response
-                    if isinstance(response_content, dict):
-                        return AgentResponse(**response_content)
-                    else:
-                        return AgentResponse(
-                            success=True,
-                            action="general_response",
-                            message=str(response_content)
-                        )
+                response_message = "I'm here to help with electronic design and BOM management."
+                if last_ai_message and hasattr(last_ai_message, 'content'):
+                    response_message = last_ai_message.content[:500]  # Limit length
 
-            return AgentResponse(
-                success=True,
-                action="general_response",
-                message="I'm here to help with electronic design and BOM management."
-            )
+                return AgentResponse(
+                    success=True,
+                    action="general_response",
+                    message=response_message
+                )
 
         except Exception as e:
             return AgentResponse(
                 success=False,
                 action="error",
-                error=str(e)
+                error=str(e),
+                message=f"Request processing failed: {str(e)}"
             )
+
+    async def get_stored_components(self) -> List[ComponentData]:
+        """Get stored components"""
+        return self._stored_components.copy()
 
     async def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Get conversation history"""
@@ -800,40 +778,206 @@ Focus on understanding intent and providing structured responses.""")
             "last_activity": datetime.now().isoformat() if self.conversation_history else None
         }
 
-    async def store_components(self, components: List[ComponentData]) -> None:
-        """Store components in agent memory"""
-        self._stored_components = components
+    async def cleanup(self) -> None:
+        """Cleanup resources"""
+        if self.silicon_expert_client:
+            await self.silicon_expert_client.close()
 
-    async def get_stored_components(self) -> List[ComponentData]:
-        """Get stored components"""
-        return self._stored_components.copy()
+    # =============================================================================
+    # Dynamic Tool Management
+    # =============================================================================
+
+    def add_custom_tool(self, tool_class: type):
+        """Add a custom tool dynamically"""
+        if self.tool_registry:
+            self.tool_registry.register_tool(tool_class)
+            # Rebuild the graph to include new tools
+            self._build_graph()
+
+    def get_available_tools(self) -> List[str]:
+        """Get list of available tool names"""
+        if self.tool_registry:
+            return list(self.tool_registry.tools.keys())
+        return []
+
+    @property
+    def stored_components(self):
+        return self._stored_components
 
 
 # =============================================================================
-# Usage Example
+# Example Custom Tool - Shows Extensibility
 # =============================================================================
 
-async def main():
-    """Example usage"""
+class ComponentListInput(BaseModel):
+    """Input schema for component list tool"""
+    format: str = Field(default="table", description="Display format: table, json, or csv")
+
+
+class ComponentListTool(AgentTool):
+    """Example custom tool for listing stored components"""
+
+    @property
+    def name(self) -> str:
+        return "list_components"
+
+    @property
+    def description(self) -> str:
+        return """List all stored components in specified format.
+
+        Input: format (string, optional) - Display format: "table", "json", or "csv"
+        Output: Formatted list of all stored components
+
+        Example: list_components(format="table")"""
+
+    @property
+    def args_schema(self):
+        return ComponentListInput
+
+    async def execute(self, resp_format: str = "table") -> AgentResponse:
+        """List components in specified format"""
+        components = self.agent.stored_components
+
+        if not components:
+            return AgentResponse(
+                success=False,
+                action=self.name,
+                error="No components available",
+                message="No components found. Please analyze a schematic first."
+            )
+
+        try:
+            if resp_format.lower() == "json":
+                components_data = [comp.to_dict() for comp in components]
+                return AgentResponse(
+                    success=True,
+                    action=self.name,
+                    message=f"Listed {len(components)} components in JSON format",
+                    data={"components": components_data, "format": "json"}
+                )
+
+            elif resp_format.lower() == "csv":
+                # Create CSV-like data structure
+                csv_data = []
+                for comp in components:
+                    csv_data.append({
+                        "Name": comp.name,
+                        "Part Number": comp.part_number or "",
+                        "Manufacturer": comp.manufacturer or "",
+                        "Value": comp.value or "",
+                        "Designator": comp.designator or "",
+                        "Enhanced": "Yes" if comp.enhanced else "No"
+                    })
+
+                return AgentResponse(
+                    success=True,
+                    action=self.name,
+                    message=f"Listed {len(components)} components in CSV format",
+                    data={"components": csv_data, "format": "csv"}
+                )
+
+            else:  # Default table format
+                table_data = []
+                for i, comp in enumerate(components, 1):
+                    table_data.append({
+                        "No": i,
+                        "Name": comp.name,
+                        "Part Number": comp.part_number or "N/A",
+                        "Manufacturer": comp.manufacturer or "N/A",
+                        "Value": comp.value or "N/A",
+                        "Designator": comp.designator or f"COMP{i}",
+                        "Enhanced": "✅" if comp.enhanced else "📋"
+                    })
+
+                return AgentResponse(
+                    success=True,
+                    action=self.name,
+                    message=f"Listed {len(components)} components in table format",
+                    data={"components": table_data, "format": "table"}
+                )
+
+        except Exception as e:
+            return AgentResponse(
+                success=False,
+                action=self.name,
+                error=str(e),
+                message=f"Failed to list components: {str(e)}"
+            )
+
+
+# =============================================================================
+# Agent Factory and Alias for Backward Compatibility
+# =============================================================================
+
+class BOMAgentFactory:
+    """Factory for creating different agent configurations"""
+
+    @staticmethod
+    async def create_standard_agent(config, session_id: str = None) -> BOMAgent:
+        """Create standard agent with default tools"""
+        agent = BOMAgent(config, session_id)
+        await agent.initialize()
+        return agent
+
+    @staticmethod
+    async def create_extended_agent(config, session_id: str = None) -> BOMAgent:
+        """Create agent with additional tools"""
+        agent = BOMAgent(config, session_id)
+        await agent.initialize()
+
+        # Add custom tools
+        agent.add_custom_tool(ComponentListTool)
+
+        return agent
+
+
+# =============================================================================
+# Usage Example and Testing
+# =============================================================================
+
+async def test_agent():
+    """Test the optimized agent"""
     from config import AppConfig
 
+    # Load configuration
     config = AppConfig.from_env()
-    agent = BOMAgent(config)
 
-    # Initialize agent
-    await agent.initialize()
+    # Create and initialize agent
+    agent = await BOMAgentFactory.create_extended_agent(config)
 
-    # Test conversation
-    response = await agent.process_request("Analyze schematic at https://example.com/schematic.png")
-    print("Response:", response.to_dict())
+    print("🤖 Optimized BOM Agent ready!")
+    print(f"📋 Available tools: {', '.join(agent.get_available_tools())}")
 
-    # Get components
-    response = await agent.process_request("Show me the components you found")
-    print("Components:", response.to_dict())
+    # Test the problematic URL from your example
+    test_url = "https://www.tronicszone.com/tronicszone/wp-content/uploads/2020/09/circuit-design-tips-1030x764.png"
 
-    # Cleanup
-    await agent.cleanup()
+    try:
+        print(f"\n🔍 Testing schematic analysis with: {test_url}")
+        response = await agent.process_request(f"analyze schematic at {test_url}")
+
+        print(f"✅ Response: {response.message}")
+        if response.data:
+            components = response.data.get('components', [])
+            print(f"📦 Found {len(components)} components")
+
+        # Test other operations
+        if response.success:
+            print("\n🔍 Testing component listing...")
+            list_response = await agent.process_request("list all components in table format")
+            print(f"📋 List response: {list_response.message}")
+
+            print("\n🔍 Testing BOM creation...")
+            bom_response = await agent.process_request("create BOM named 'Test Circuit' for project 'Demo'")
+            print(f"📋 BOM response: {bom_response.message}")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+
+    finally:
+        # Cleanup
+        await agent.cleanup()
+        print("✅ Agent cleanup complete")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(test_agent())

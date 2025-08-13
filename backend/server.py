@@ -14,9 +14,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Set
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 
 from config import AppConfig
 from main import BOMAgent, AgentResponse
@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
 
-    @validator('message')
+    @field_validator('message')
     def validate_message(cls, v):
         if not v or not v.strip():
             raise ValueError('Message cannot be empty')

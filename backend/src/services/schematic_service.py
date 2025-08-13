@@ -1,10 +1,10 @@
 # src/services/schematic_service.py
 """Simplified schematic analysis service with no timeouts."""
 
+import asyncio
 import json
 import re
-import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI

@@ -163,7 +163,6 @@ class SiliconExpertClient:
                             data.get('Result') and len(data['Result']) > 0):
 
                         first_result = data['Result'][0]
-                        confidence = self._calculate_confidence(first_result, component_data)
 
                         print(f"✅ Found component: {first_result.get('PartNumber', 'Unknown')}")
 
@@ -173,7 +172,6 @@ class SiliconExpertClient:
                             manufacturer=first_result.get('Manufacturer'),
                             description=first_result.get('Description'),
                             lifecycle=first_result.get('Lifecycle'),
-                            confidence=confidence,
                             raw_data=first_result
                         )
                     else:
@@ -200,32 +198,6 @@ class SiliconExpertClient:
             confidence=0.0,
             error_message="Max retries exceeded"
         )
-
-    def _calculate_confidence(self, result: Dict[str, Any], original_data: Dict[str, Any]) -> float:
-        """Calculate confidence score"""
-        base_confidence = {
-            'Exact': 1.0,
-            'High': 0.9,
-            'Medium': 0.7,
-            'Low': 0.5
-        }.get(result.get('MatchRating', ''), 0.3)
-
-        # Boost confidence if key fields match
-        confidence_boost = 0.0
-
-        # Check part number match
-        original_pn = original_data.get('part_number', '').lower()
-        result_pn = result.get('PartNumber', '').lower()
-        if original_pn and result_pn and original_pn in result_pn:
-            confidence_boost += 0.1
-
-        # Check manufacturer match
-        original_mfr = original_data.get('manufacturer', '').lower()
-        result_mfr = result.get('Manufacturer', '').lower()
-        if original_mfr and result_mfr and original_mfr in result_mfr:
-            confidence_boost += 0.1
-
-        return min(1.0, base_confidence + confidence_boost)
 
     async def create_bom(self, bom_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create BOM with unlimited time"""

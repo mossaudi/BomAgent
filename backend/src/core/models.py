@@ -95,31 +95,32 @@ class UserInteraction:
 
 @dataclass
 class ComponentData:
-    """Standardized component data structure."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    name: str = ""
+    """Single component model used throughout the application"""
+    id: Optional[str] = None
+    name: Optional[str] = None
     part_number: Optional[str] = None
     manufacturer: Optional[str] = None
     description: Optional[str] = None
     value: Optional[str] = None
-    quantity: int = 1
     designator: Optional[str] = None
     confidence: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    enhanced: bool = False
+    category: Optional[str] = None
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+        if not self.id:
+            self.id = str(uuid.uuid4())
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "part_number": self.part_number,
-            "manufacturer": self.manufacturer,
-            "description": self.description,
-            "value": self.value,
-            "quantity": self.quantity,
-            "designator": self.designator,
-            "confidence": self.confidence,
-            "metadata": self.metadata
-        }
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ComponentData':
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
 
 
 @dataclass
