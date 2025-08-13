@@ -4,17 +4,16 @@
 from typing import List, Dict, Any
 
 from src.clients.silicon_expert_client import SiliconExpertClient
-
-from main import ComponentData
 from src.services.memory_service import MemoryService
+from src.core.models import ComponentData
 
 
 class ComponentService:
     """Service for component operations."""
 
-    def __init__(self, silicon_expert_client: SiliconExpertClient, memory_service: MemoryService):
-        self.client = silicon_expert_client
-        self.memory = memory_service
+    def __init__(self):
+        self.client = SiliconExpertClient
+        self.memory = MemoryService
 
     async def parse_components(self, raw_data: Dict[str, Any]) -> List[ComponentData]:
         """Parse raw component data into structured format."""

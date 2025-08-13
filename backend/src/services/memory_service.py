@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-from main import ComponentData
+from src.core.models import ComponentData
 
 
 class MemoryService:
@@ -64,7 +64,7 @@ class MemoryService:
 
     async def get_stored_components(self) -> List[ComponentData]:
         """Thread-safe component retrieval."""
-        with self._lock:
+        async with self._lock:
             key = f"{self.session_id}:components"
             if key not in self._storage:
                 return []

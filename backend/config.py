@@ -1,6 +1,7 @@
-# config.py - Simplified Configuration Management
+# config_simplified.py - Simplified Configuration
 """
-Clean configuration management with validation
+Simplified configuration removing agent LLM selection complexity.
+Uses only Gemini for consistency.
 """
 import os
 from dataclasses import dataclass
@@ -27,9 +28,10 @@ class SiliconExpertConfig:
 
 @dataclass
 class AppConfig:
-    """Main application configuration"""
+    """Simplified application configuration"""
     google_api_key: str
     silicon_expert: SiliconExpertConfig
+    llm_provider: str = "gemini"  # Options: "gemini", "openai", "anthropic", "ollama"
     debug: bool = False
     max_conversation_history: int = 50
     session_timeout_hours: int = 2
@@ -47,18 +49,33 @@ class AppConfig:
         return cls(
             google_api_key=os.getenv("GOOGLE_API_KEY", ""),
             silicon_expert=silicon_expert_config,
+            llm_provider=os.getenv("LLM_PROVIDER", "gemini").lower(),
             debug=os.getenv("DEBUG", "false").lower() == "true",
             max_conversation_history=int(os.getenv("MAX_CONVERSATION_HISTORY", "50")),
             session_timeout_hours=int(os.getenv("SESSION_TIMEOUT_HOURS", "2"))
         )
 
     def validate(self) -> List[str]:
-        """Validate all configuration"""
+        """Validate configuration"""
         errors = []
 
-        if not self.google_api_key:
-            errors.append("GOOGLE_API_KEY is required")
+        # Check required API keys based on LLM provider
+        if self.llm_provider == "gemini":
+            if not self.google_api_key:
+                errors.append("GOOGLE_API_KEY is required for Gemini")
+        elif self.llm_provider == "openai":
+            if not os.getenv("OPENAI_API_KEY"):
+                errors.append("OPENAI_API_KEY is required for OpenAI")
+        elif self.llm_provider == "anthropic":
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                errors.append("ANTHROPIC_API_KEY is required for Anthropic")
+        elif self.llm_provider == "ollama":
+            # Ollama runs locally, no API key needed
+            pass
+        else:
+            errors.append(f"Unsupported LLM provider: {self.llm_provider}")
 
+        # Always validate Silicon Expert
         errors.extend(self.silicon_expert.validate())
 
         return errors

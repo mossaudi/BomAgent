@@ -1,9 +1,9 @@
-// src/app/components/chat-interface/chat-interface.component.ts
+// src/app/components/chat-interface/chat-interface.component.ts - UPDATED
 import { Component, OnInit, OnDestroy, ViewChild, ElementRef, AfterViewChecked } from '@angular/core';
 import { FormControl, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { ChatService } from '../../services/chat.service';
-import { ChatMessage, HumanApprovalRequest } from '../../models/chat.models';
+import { ChatMessage, HumanApprovalRequest, AgentResponse } from '../../models/chat.models';
 
 @Component({
   selector: 'app-chat-interface',
@@ -41,9 +41,14 @@ import { ChatMessage, HumanApprovalRequest } from '../../models/chat.models';
               <!-- Agent Message -->
               <div *ngSwitchCase="'agent'" class="agent-message">
                 <app-response-renderer
-                  [response]="getResponseForMessage(message)"
+                  [response]="message.response"
                   (actionClicked)="onActionClicked($event)">
                 </app-response-renderer>
+
+                <!-- Fallback for messages without response data -->
+                <div *ngIf="!message.response" class="simple-message">
+                  {{message.content}}
+                </div>
               </div>
 
               <!-- Approval Message -->
@@ -97,6 +102,12 @@ import { ChatMessage, HumanApprovalRequest } from '../../models/chat.models';
           <button class="btn btn-sm btn-outline" (click)="quickAction('help')">
             ❓ Help
           </button>
+          <!-- Add suggestions from last response -->
+          <button *ngFor="let suggestion of getLastSuggestions()"
+                  class="btn btn-sm btn-outline"
+                  (click)="quickAction(suggestion)">
+            ✨ {{suggestion}}
+          </button>
         </div>
       </div>
     </div>
@@ -125,6 +136,7 @@ export class ChatInterfaceComponent implements OnInit, OnDestroy, AfterViewCheck
       this.chatService.messages$.subscribe(messages => {
         this.messages = messages;
         this.shouldScrollToBottom = true;
+        console.log('Messages updated:', messages); // Debug log
       })
     );
 
@@ -180,7 +192,6 @@ export class ChatInterfaceComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   onActionClicked(action: string): void {
-    // Handle action clicks from response renderer
     console.log('Action clicked:', action);
 
     switch (action) {
@@ -198,14 +209,18 @@ export class ChatInterfaceComponent implements OnInit, OnDestroy, AfterViewCheck
     }
   }
 
-  getResponseForMessage(message: ChatMessage): any {
-    // In a real implementation, you'd store the full response data
-    // For now, return a mock response structure
-    return {
-      data: null,
-      response_type: 'generic',
-      ui_recommendations: null
-    };
+  // REMOVED: No longer needed - response is stored in message.response
+  // getResponseForMessage(message: ChatMessage): any {
+  //   return message.response;
+  // }
+
+  // NEW: Get suggestions from the last agent response
+  getLastSuggestions(): string[] {
+    const lastAgentMessage = [...this.messages]
+      .reverse()
+      .find(msg => msg.type === 'agent' && msg.response);
+
+    return lastAgentMessage?.response?.suggestions || [];
   }
 
   async showMemoryStatus(): Promise<void> {

@@ -1,4 +1,4 @@
-// src/app/components/response-renderer/response-renderer.component.scss
+// src/app/components/response-renderer/response-renderer.component.scss - ENHANCED
 .response-container {
   margin: 1rem 0;
 }
@@ -44,10 +44,24 @@
   }
 
   .action-buttons {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
     margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(0, 123, 255, 0.05);
+    border-radius: 8px;
+    border: 1px solid rgba(0, 123, 255, 0.1);
+
+    h5 {
+      margin: 0 0 0.75rem 0;
+      font-size: 0.9em;
+      color: #495057;
+      font-weight: 600;
+    }
+
+    .buttons-grid {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
 
     .btn {
       padding: 0.5rem 1rem;
@@ -58,11 +72,25 @@
       cursor: pointer;
       font-size: 0.85em;
       transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
 
       &:hover {
         background: #007bff;
         color: white;
         transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 123, 255, 0.2);
+      }
+
+      &.suggestion {
+        border-color: #28a745;
+        color: #28a745;
+
+        &:hover {
+          background: #28a745;
+          color: white;
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-// src/app/models/chat.models.ts
+// src/app/models/chat.models.ts - UPDATED
 export enum ResponseType {
   TABLE = 'table',
   TREE = 'tree',
@@ -36,21 +36,25 @@ export interface HumanApprovalRequest {
   created_at: string;
 }
 
+// UPDATED: ChatMessage now stores full response
 export interface ChatMessage {
   id: string;
   type: 'user' | 'agent' | 'approval';
   content: string;
   timestamp: string;
   session_id: string;
+  response: AgentResponse | null; // Changed from optional to null union type
 }
 
+// UPDATED: AgentResponse to match API response structure
 export interface AgentResponse {
   id: string;
   success: boolean;
-  response_type: ResponseType;
+  type: ResponseType; // Changed from response_type to type
   data?: any;
   error?: string;
   message?: string;
+  suggestions?: string[]; // Add suggestions from API
   ui_recommendations?: UIRecommendation;
   next_actions?: string[];
   approval_request?: HumanApprovalRequest;

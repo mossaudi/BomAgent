@@ -1,5 +1,5 @@
 # src/clients/silicon_expert_client.py
-"""Modern Silicon Expert client with async support."""
+"""Simplified Silicon Expert client with no timeouts."""
 
 import asyncio
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ from config import SiliconExpertConfig
 
 @dataclass
 class SearchResult:
-    """Enhanced search result with error details."""
+    """Search result with error handling."""
     success: bool
     part_number: Optional[str] = None
     manufacturer: Optional[str] = None
@@ -22,49 +22,21 @@ class SearchResult:
     confidence: float = 0.0
     raw_data: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
-    retry_after: Optional[int] = None
-
-
-class RateLimiter:
-    """Simple rate limiter for API calls."""
-
-    def __init__(self, calls_per_minute: int = 60):
-        self.calls_per_minute = calls_per_minute
-        self.calls = []
-        self._lock = asyncio.Lock()
-
-    async def acquire(self):
-        """Acquire rate limit permit."""
-        async with self._lock:
-            now = datetime.now()
-            # Remove calls older than 1 minute
-            self.calls = [call_time for call_time in self.calls
-                          if now - call_time < timedelta(minutes=1)]
-
-            if len(self.calls) >= self.calls_per_minute:
-                # Calculate wait time
-                oldest_call = min(self.calls)
-                wait_time = 60 - (now - oldest_call).total_seconds()
-                if wait_time > 0:
-                    await asyncio.sleep(wait_time)
-
-            self.calls.append(now)
 
 
 class SiliconExpertClient:
-    """Enhanced Silicon Expert client with proper error handling and rate limiting."""
+    """Simplified Silicon Expert client with no timeouts."""
 
     def __init__(self, config: SiliconExpertConfig):
         self.config = config
         self.session: Optional[aiohttp.ClientSession] = None
         self.authenticated = False
         self.auth_expires: Optional[datetime] = None
-        self.rate_limiter = RateLimiter(calls_per_minute=50)  # Conservative limit
-        self._connection_timeout = aiohttp.ClientTimeout(total=30, connect=10)
 
     async def _ensure_session(self):
-        """Ensure HTTP session exists with proper configuration."""
+        """Ensure HTTP session exists"""
         if not self.session or self.session.closed:
+            # NO TIMEOUT - let requests take as long as needed
             connector = aiohttp.TCPConnector(
                 limit=100,
                 limit_per_host=10,
@@ -74,20 +46,21 @@ class SiliconExpertClient:
 
             self.session = aiohttp.ClientSession(
                 connector=connector,
-                timeout=self._connection_timeout,
-                headers={'User-Agent': 'BOM-Agent/2.1.0'}
+                headers={'User-Agent': 'Simple-BOM-Agent/3.0.0'}
+                # NO timeout parameter - unlimited time
             )
 
     async def authenticate(self) -> bool:
-        """Enhanced authentication with expiration tracking."""
+        """Authenticate with Silicon Expert"""
         # Check if we still have valid auth
         if self.authenticated and self.auth_expires and datetime.now() < self.auth_expires:
             return True
 
         await self._ensure_session()
-        await self.rate_limiter.acquire()
 
         try:
+            print("🔐 Authenticating with Silicon Expert...")
+
             async with self.session.post(
                     f"{self.config.base_url}/search/authenticateUser",
                     headers={'content-type': 'application/x-www-form-urlencoded'},
@@ -95,41 +68,37 @@ class SiliconExpertClient:
                         'login': self.config.username,
                         'apiKey': self.config.api_key
                     }
+                    # NO timeout - let it take as long as needed
             ) as response:
 
                 if response.status == 200:
                     self.authenticated = True
-                    # Set expiration to 1 hour from now (conservative)
-                    self.auth_expires = datetime.now() + timedelta(hours=1)
+                    # Set expiration to 2 hours from now
+                    self.auth_expires = datetime.now() + timedelta(hours=2)
+                    print("✅ Silicon Expert authentication successful")
                     return True
                 elif response.status == 401:
+                    print("❌ Silicon Expert authentication failed - Invalid credentials")
                     raise Exception("Invalid credentials")
-                elif response.status == 429:
-                    retry_after = int(response.headers.get('Retry-After', '60'))
-                    raise Exception(f"Rate limited. Retry after {retry_after} seconds")
                 else:
                     error_text = await response.text()
+                    print(f"❌ Silicon Expert authentication failed - HTTP {response.status}")
                     raise Exception(f"Authentication failed: HTTP {response.status} - {error_text}")
 
-        except asyncio.TimeoutError:
-            raise Exception("Authentication timeout")
-        except aiohttp.ClientError as e:
-            raise Exception(f"Authentication network error: {str(e)}")
         except Exception as e:
             self.authenticated = False
             self.auth_expires = None
+            print(f"❌ Authentication error: {e}")
             raise
 
     async def search_component(self, component_data: Dict[str, Any], max_retries: int = 3) -> SearchResult:
-        """Enhanced component search with retry logic."""
+        """Search component with unlimited time"""
         for attempt in range(max_retries):
             try:
                 if not self.authenticated:
                     await self.authenticate()
 
-                await self.rate_limiter.acquire()
-
-                # Build search query with better logic
+                # Build search query
                 search_parts = []
                 for field in ['part_number', 'manufacturer', 'description', 'name']:
                     value = component_data.get(field)
@@ -144,40 +113,43 @@ class SiliconExpertClient:
                     )
 
                 search_query = ' '.join(search_parts)
+                print(f"🔍 Searching Silicon Expert for: {search_query}")
 
                 params = {
                     'fmt': 'json',
                     'pageNumber': '1',
-                    'pageSize': '5',
+                    'pageSize': '3',  # Reduced for faster response
                     'description': search_query
                 }
 
                 async with self.session.get(
                         f"{self.config.base_url}/search/partsearch",
                         params=params
+                        # NO timeout - unlimited time
                 ) as response:
 
                     if response.status == 401:
                         # Auth expired, retry
+                        print("🔄 Authentication expired, retrying...")
                         self.authenticated = False
                         self.auth_expires = None
                         if attempt < max_retries - 1:
                             continue
 
                     if response.status == 429:
-                        retry_after = int(response.headers.get('Retry-After', '60'))
+                        print("⏳ Rate limited, waiting...")
                         if attempt < max_retries - 1:
-                            await asyncio.sleep(min(retry_after, 120))  # Cap at 2 minutes
+                            await asyncio.sleep(10)  # Wait 10 seconds
                             continue
                         return SearchResult(
                             success=False,
                             confidence=0.0,
-                            error_message="Rate limited",
-                            retry_after=retry_after
+                            error_message="Rate limited"
                         )
 
                     if response.status != 200:
                         error_text = await response.text()
+                        print(f"❌ Search failed - HTTP {response.status}")
                         return SearchResult(
                             success=False,
                             confidence=0.0,
@@ -186,12 +158,14 @@ class SiliconExpertClient:
 
                     data = await response.json()
 
-                    # Enhanced result parsing
+                    # Parse results
                     if (data.get('Status', {}).get('Success') == 'true' and
                             data.get('Result') and len(data['Result']) > 0):
 
                         first_result = data['Result'][0]
                         confidence = self._calculate_confidence(first_result, component_data)
+
+                        print(f"✅ Found component: {first_result.get('PartNumber', 'Unknown')}")
 
                         return SearchResult(
                             success=True,
@@ -203,37 +177,22 @@ class SiliconExpertClient:
                             raw_data=first_result
                         )
                     else:
+                        print("⚠️ No matching components found")
                         return SearchResult(
                             success=True,  # Request succeeded but no results
                             confidence=0.0,
                             error_message="No matching components found"
                         )
 
-            except asyncio.TimeoutError:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-                return SearchResult(
-                    success=False,
-                    confidence=0.0,
-                    error_message="Request timeout"
-                )
-
-            except aiohttp.ClientError as e:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-                return SearchResult(
-                    success=False,
-                    confidence=0.0,
-                    error_message=f"Network error: {str(e)}"
-                )
-
             except Exception as e:
+                print(f"⚠️ Search attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)  # Brief pause before retry
+                    continue
                 return SearchResult(
                     success=False,
                     confidence=0.0,
-                    error_message=f"Unexpected error: {str(e)}"
+                    error_message=f"Search error: {str(e)}"
                 )
 
         return SearchResult(
@@ -243,7 +202,7 @@ class SiliconExpertClient:
         )
 
     def _calculate_confidence(self, result: Dict[str, Any], original_data: Dict[str, Any]) -> float:
-        """Enhanced confidence calculation."""
+        """Calculate confidence score"""
         base_confidence = {
             'Exact': 1.0,
             'High': 0.9,
@@ -269,21 +228,24 @@ class SiliconExpertClient:
         return min(1.0, base_confidence + confidence_boost)
 
     async def create_bom(self, bom_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Enhanced BOM creation with proper error handling."""
+        """Create BOM with unlimited time"""
         try:
             if not self.authenticated:
                 await self.authenticate()
 
-            await self.rate_limiter.acquire()
+            print(f"📋 Creating BOM: {bom_data.get('name', 'Unknown')}")
 
             async with self.session.post(
                     f"{self.config.base_url}/bom/add-empty-bom",
                     headers={'Content-Type': 'application/json'},
                     json=bom_data
+                    # NO timeout
             ) as response:
 
                 if response.status == 200:
-                    return await response.json()
+                    result = await response.json()
+                    print("✅ BOM created successfully")
+                    return result
                 elif response.status == 401:
                     self.authenticated = False
                     raise Exception("Authentication expired")
@@ -294,10 +256,11 @@ class SiliconExpertClient:
                     raise Exception(f"BOM creation failed: HTTP {response.status} - {error_text}")
 
         except Exception as e:
+            print(f"❌ BOM creation error: {e}")
             raise Exception(f"BOM creation error: {str(e)}")
 
     async def add_parts_to_bom(self, bom_name: str, project: str, parts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Enhanced parts addition with validation."""
+        """Add parts to BOM with unlimited time"""
         if not parts:
             raise ValueError("No parts provided")
 
@@ -305,7 +268,7 @@ class SiliconExpertClient:
             if not self.authenticated:
                 await self.authenticate()
 
-            await self.rate_limiter.acquire()
+            print(f"📦 Adding {len(parts)} parts to BOM: {bom_name}")
 
             payload = {
                 "name": bom_name,
@@ -317,10 +280,13 @@ class SiliconExpertClient:
                     f"{self.config.base_url}/bom/add-parts-to-bom",
                     headers={'Content-Type': 'application/json'},
                     json=payload
+                    # NO timeout
             ) as response:
 
                 if response.status == 200:
-                    return await response.json()
+                    result = await response.json()
+                    print("✅ Parts added to BOM successfully")
+                    return result
                 elif response.status == 401:
                     self.authenticated = False
                     raise Exception("Authentication expired")
@@ -331,15 +297,16 @@ class SiliconExpertClient:
                     raise Exception(f"Add parts failed: HTTP {response.status} - {error_text}")
 
         except Exception as e:
+            print(f"❌ Add parts error: {e}")
             raise Exception(f"Add parts error: {str(e)}")
 
     async def get_boms(self, project_name: str = "") -> Dict[str, Any]:
-        """Enhanced BOM retrieval."""
+        """Get BOMs with unlimited time"""
         try:
             if not self.authenticated:
                 await self.authenticate()
 
-            await self.rate_limiter.acquire()
+            print("📋 Retrieving BOMs...")
 
             params = {"fmt": "json"}
             if project_name:
@@ -348,10 +315,14 @@ class SiliconExpertClient:
             async with self.session.post(
                     f"{self.config.base_url}/search/GetBOMs",
                     params=params
+                    # NO timeout
             ) as response:
 
                 if response.status == 200:
-                    return await response.json()
+                    result = await response.json()
+                    bom_count = len(result.get('boms', []))
+                    print(f"✅ Retrieved {bom_count} BOMs")
+                    return result
                 elif response.status == 401:
                     self.authenticated = False
                     raise Exception("Authentication expired")
@@ -360,13 +331,15 @@ class SiliconExpertClient:
                     raise Exception(f"Get BOMs failed: HTTP {response.status} - {error_text}")
 
         except Exception as e:
+            print(f"❌ Get BOMs error: {e}")
             raise Exception(f"Get BOMs error: {str(e)}")
 
     async def close(self):
-        """Enhanced cleanup."""
+        """Clean shutdown"""
         if self.session and not self.session.closed:
             await self.session.close()
             self.session = None
+            print("✅ Silicon Expert client closed")
 
         self.authenticated = False
         self.auth_expires = None

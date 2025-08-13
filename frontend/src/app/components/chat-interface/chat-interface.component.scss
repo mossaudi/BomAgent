@@ -7,6 +7,15 @@
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+.simple-message {
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  border-left: 4px solid #007bff;
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+
 .chat-header {
   background: rgba(255, 255, 255, 0.95);
   padding: 1rem 2rem;

@@ -6,14 +6,15 @@ from datetime import datetime
 
 from src.clients.silicon_expert_client import SiliconExpertClient
 from src.services.memory_service import MemoryService
+from src.core.models import BOMData
 
 
 class BOMService:
     """Service for BOM operations."""
 
-    def __init__(self, silicon_expert_client: SiliconExpertClient, memory_service: MemoryService):
-        self.client = silicon_expert_client
-        self.memory = memory_service
+    def __init__(self):
+        self.client = SiliconExpertClient
+        self.memory = MemoryService
 
     async def create_bom(self, name: str, description: str = "", project: str = "") -> Dict[str, Any]:
         """Create a new BOM."""

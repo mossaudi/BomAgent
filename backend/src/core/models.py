@@ -1,10 +1,10 @@
-# src/models/state.py
+# src/models/models.py
 """Modern state management and response models for LangGraph agent."""
 
 from __future__ import annotations
 from typing import Dict, Any, List, Optional, Union, TypedDict, Annotated
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 import uuid
 
@@ -299,3 +299,35 @@ class ResponseBuilder:
                 actions=["approve", "reject", "modify"]
             )
         )
+
+class ResponseType(Enum):
+    """UI response types for Angular frontend"""
+    SUCCESS = "success"
+    ERROR = "error"
+    TABLE = "table"
+    CONFIRMATION = "confirmation"
+    PROGRESS = "progress"
+    TREE = "tree"
+
+
+@dataclass
+class AgentResponse:
+    """Standardized response for Angular UI"""
+    id: str
+    success: bool
+    type: ResponseType
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    suggestions: List[str] = None
+    timestamp: str = None
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
+        if self.suggestions is None:
+            self.suggestions = []
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = asdict(self)
+        result['type'] = self.type.value  # Convert enum to string
+        return result

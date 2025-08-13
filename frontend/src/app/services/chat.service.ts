@@ -1,4 +1,4 @@
-// src/app/services/chat.service.ts
+// src/app/services/chat.service.ts - UPDATED
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
@@ -36,7 +36,8 @@ export class ChatService {
       type: 'user',
       content,
       timestamp: new Date().toISOString(),
-      session_id: this.sessionId
+      session_id: this.sessionId,
+      response: null // User messages don't have responses
     };
 
     this.addMessage(userMessage);
@@ -55,7 +56,10 @@ export class ChatService {
     }
   }
 
+  // UPDATED: Store full response in message
   private handleAgentResponse(response: AgentResponse): void {
+    console.log('Handling agent response:', response); // Debug log
+
     // Check if approval is required
     if (response.approval_request) {
       this.pendingApprovalSubject.next(response.approval_request);
@@ -65,18 +69,20 @@ export class ChatService {
         type: 'approval',
         content: response.approval_request.message,
         timestamp: response.timestamp,
-        session_id: this.sessionId
+        session_id: this.sessionId,
+        response: response // Store full response
       };
 
       this.addMessage(approvalMessage);
     } else {
-      // Regular agent response
+      // Regular agent response - STORE THE FULL RESPONSE
       const agentMessage: ChatMessage = {
         id: response.id,
         type: 'agent',
         content: response.message || 'Operation completed',
         timestamp: response.timestamp,
-        session_id: this.sessionId
+        session_id: this.sessionId,
+        response: response // This is the key fix!
       };
 
       this.addMessage(agentMessage);
@@ -117,7 +123,8 @@ export class ChatService {
         type: 'agent',
         content: 'Memory cleared successfully',
         timestamp: new Date().toISOString(),
-        session_id: this.sessionId
+        session_id: this.sessionId,
+        response: null // Set to null for non-response messages
       };
 
       this.addMessage(clearMessage);
@@ -134,12 +141,22 @@ export class ChatService {
   private handleError(error: any): void {
     console.error('Chat service error:', error);
 
+    const errorResponse: AgentResponse = {
+      id: this.generateId(),
+      success: false,
+      type: 'error' as any,
+      error: error.message || 'Something went wrong',
+      session_id: this.sessionId,
+      timestamp: new Date().toISOString()
+    };
+
     const errorMessage: ChatMessage = {
       id: this.generateId(),
       type: 'agent',
       content: `Error: ${error.message || 'Something went wrong'}`,
       timestamp: new Date().toISOString(),
-      session_id: this.sessionId
+      session_id: this.sessionId,
+      response: errorResponse // Store error response too
     };
 
     this.addMessage(errorMessage);

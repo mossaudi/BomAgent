@@ -1,16 +1,12 @@
-# ================================================================================================
-# run_server.py - Server Startup Script
-# ================================================================================================
-
-# !/usr/bin/env python3
+# run_fixed_server.py - Startup Script for Fixed Server
 """
-Simple server startup script with proper error handling
+Startup script for the fixed server with lazy initialization.
 """
 
-import asyncio
 import sys
-import uvicorn
 from pathlib import Path
+
+import uvicorn
 
 from config import AppConfig
 
@@ -34,21 +30,31 @@ def main():
             print("❌ Configuration errors:")
             for error in validation_errors:
                 print(f"  - {error}")
-            print("\n📝 Please check your .env file and ensure all required variables are set.")
+            print("\n📋 Please check your .env file and ensure all required variables are set.")
             sys.exit(1)
 
         print("✅ Configuration validated successfully")
         print(f"🔧 Debug mode: {'ON' if config.debug else 'OFF'}")
-        print("🚀 Starting BOM Agent server...")
+        print(f"🤖 LLM Provider: {config.llm_provider}")
+        print("🚀 Starting BOM Agent server with lazy initialization...")
+        print("")
+        print("🔥 Key improvements:")
+        print("  - Agents created on-demand (no startup blocking)")
+        print("  - Fast health checks (< 2 seconds)")
+        print("  - Better timeout handling")
+        print("  - Improved error messages")
+        print("")
 
-        # Run server
+        # Use the fixed server module
         uvicorn.run(
             "server:app",
             host="0.0.0.0",
-            port=8000,
+            port=9000,
             reload=config.debug,
             log_level="info" if not config.debug else "debug",
-            access_log=True
+            access_log=True,
+            timeout_keep_alive=30,
+            timeout_graceful_shutdown=15
         )
 
     except KeyboardInterrupt:
