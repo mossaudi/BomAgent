@@ -13,9 +13,9 @@ from src.core.models import ComponentData
 class BOMService:
     """Service for BOM operations."""
 
-    def __init__(self):
-        self.client = SiliconExpertClient
-        self.memory = MemoryService
+    def __init__(self, silicon_expert_client: SiliconExpertClient, memory_service: MemoryService):
+        self.client = silicon_expert_client
+        self.memory = memory_service
 
     async def create_bom(self, name: str, description: str = "", project: str = "") -> Dict[str, Any]:
         """Create a new BOM."""

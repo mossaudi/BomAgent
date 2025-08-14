@@ -33,10 +33,11 @@ class ServiceRegistry:
     vision_llm: BaseLanguageModel
 
 
-class SimplifiedContainer:
+class Container:
     """Simplified container with better LLM management."""
 
     def __init__(self, config: AppConfig, session_id: Optional[str] = None):
+        self.silicon_expert_client = None
         self.config = config
         self.session_id = session_id
         self._services: Optional[ServiceRegistry] = None
@@ -131,7 +132,3 @@ class SimplifiedContainer:
             except Exception as e:
                 print(f"Cleanup warning: {e}")
         self._initialized = False
-
-
-# Backward compatibility alias
-Container = SimplifiedContainer

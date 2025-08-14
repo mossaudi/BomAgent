@@ -11,31 +11,26 @@ Optimized ReAct agent addressing all identified issues:
 import asyncio
 import json
 import uuid
-from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Optional, Literal
-from datetime import datetime
-from urllib.parse import urlparse
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Dict, Any, List, Optional, Literal
+from urllib.parse import urlparse
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
-from src.clients.silicon_expert_client import SiliconExpertClient
-from src.core.models import ComponentData
-from src.services.bom_service import BOMService
-from src.services.component_service import ComponentService
-from src.services.schematic_service import SchematicService
+from src.core.bom_tools import ComponentStateManager
+from src.core.container import Container
+from src.core.models import ComponentData, AgentResponse
 
 
 # =============================================================================
 # Core Models - Single Source of Truth
 # =============================================================================
-
-
 
 @dataclass
 class AgentResponse:
@@ -54,17 +49,6 @@ class AgentResponse:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
-
-@dataclass
-class SearchResult:
-    """Search result model"""
-    success: bool
-    part_number: Optional[str] = None
-    manufacturer: Optional[str] = None
-    description: Optional[str] = None
-    lifecycle: Optional[str] = None
-    confidence: float = 0.0
-    error_message: Optional[str] = None
 
 # =============================================================================
 # Tool System - Fixed and Enhanced
@@ -155,7 +139,7 @@ class SchematicAnalysisTool(AgentTool):
 
         try:
             # Analyze schematic
-            analysis_result = await self.agent.schematic_service.analyze(image_url)
+            analysis_result = await self.agent.container.services.schematic.analyze_with_retry(image_url)
 
             if not analysis_result.get('components'):
                 return AgentResponse(
@@ -166,7 +150,7 @@ class SchematicAnalysisTool(AgentTool):
                 )
 
             # Convert to ComponentData objects
-            components = []
+            raw_components = []
             for comp_data in analysis_result['components']:
                 component = ComponentData(
                     name=comp_data.get('name', 'Unknown'),
@@ -178,13 +162,16 @@ class SchematicAnalysisTool(AgentTool):
                     confidence=float(comp_data.get('confidence', 0.5)),
                     category=comp_data.get('category', 'other')
                 )
-                components.append(component)
+                raw_components.append(component)
+
+            # Store raw components
+            await self.agent.container.services.memory.store_components(raw_components)
 
             # Auto-enhance components
-            enhanced_components = await self.agent.component_service.search_and_enhance(components)
+            enhanced_components = await self.agent.container.services.component.search_and_enhance(raw_components)
 
-            # Store components
-            self.agent._stored_components = enhanced_components
+            # Store enhanced components
+            self.agent.component_state.store_enhanced_components(enhanced_components)
 
             enhanced_count = sum(1 for comp in enhanced_components if comp.enhanced)
 
@@ -249,7 +236,7 @@ class ComponentSearchTool(AgentTool):
 
         try:
             search_data = {"name": query.strip(), "description": query.strip()}
-            result_list  = await self.agent.component_service.search_and_enhance([search_data])
+            result_list = await self.agent.container.services.component.search_and_enhance([search_data])
 
             result = result_list[0] or {}
             if result.success and result.part_number:
@@ -319,14 +306,14 @@ class BOMCreateTool(AgentTool):
             )
 
         try:
-            result = await self.agent.bom_service.create_bom(
+            result = await self.agent.container.services.bom.create_bom(
                 name=name.strip(),
-                project=project.strip(),
-                description=description.strip()
+                description=description.strip(),
+                project=project.strip()
             )
 
             if result.get('success'):
-                components_count = len(self.agent.stored_components)
+                components_count = len(self.agent.component_state.get_components_for_bom())
 
                 return AgentResponse(
                     success=True,
@@ -388,7 +375,9 @@ class BOMAddComponentsTool(AgentTool):
                 message="Please provide the name of the BOM to add components to."
             )
 
-        if not self.agent.stored_components:
+        components = self.agent.component_state.get_components_for_bom()
+
+        if not components:
             return AgentResponse(
                 success=False,
                 action=self.name,
@@ -397,22 +386,30 @@ class BOMAddComponentsTool(AgentTool):
             )
 
         try:
-            result = await self.agent.bom_service.add_parts(
-                bom_name.strip(),
-                '',
-                parts=self.agent.stored_components
-            )
+            # Convert to API format
+            parts_data = []
+            for comp in components:
+                part = {
+                    "part_number": comp.part_number or comp.designator or "Unknown",
+                    "manufacturer": comp.manufacturer or "Unknown",
+                    "description": f"{comp.name} - {comp.description or comp.value or ''}".strip(" - "),
+                    "quantity": str(comp.quantity),
+                    "designator": comp.designator or ""
+                }
+                parts_data.append(part)
+
+            result = await self.agent.container.services.bom.add_parts(bom_name.strip(), "", parts_data)
 
             if result.get('success'):
-                enhanced_count = sum(1 for comp in self.agent.stored_components if comp.enhanced)
+                enhanced_count = sum(1 for comp in components if comp.enhanced)
 
                 return AgentResponse(
                     success=True,
                     action=self.name,
-                    message=f"Successfully added {len(self.agent.stored_components)} components to BOM '{bom_name}' ({enhanced_count} enhanced).",
+                    message=f"Successfully added {len(components)} components to BOM '{bom_name}' ({enhanced_count} enhanced).",
                     data={
                         "bom_name": bom_name,
-                        "components_added": len(self.agent.stored_components),
+                        "components_added": len(components),
                         "enhanced_count": enhanced_count
                     }
                 )
@@ -508,23 +505,12 @@ class BOMAgent:
         self.config = config
         self.session_id = session_id or str(uuid.uuid4())
 
-        # Initialize LLM
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest",
-            google_api_key=config.google_api_key,
-            temperature=0.1,
-            max_output_tokens=4000
-        )
+        # Initialize Container
+        self.container = Container(config, session_id)
 
         # Component storage
         self._stored_components: List[ComponentData] = []
         self.conversation_history: List[Dict[str, Any]] = []
-
-        # Services (will be initialized in initialize())
-        self.silicon_expert_client:SiliconExpertClient = None
-        self.schematic_service:SchematicService = None
-        self.component_service:ComponentService = None
-        self.bom_service:BOMService = None
 
         # Tool registry
         self.tool_registry = None
@@ -532,18 +518,13 @@ class BOMAgent:
         # LangGraph
         self.graph = None
 
+        # Component state manager
+        self.component_state = ComponentStateManager()
+
     async def initialize(self) -> None:
         """Initialize all services"""
         try:
-
-            # Initialize Silicon Expert client
-            self.silicon_expert_client = SiliconExpertClient(self.config.silicon_expert)
-            await self.silicon_expert_client.authenticate()
-
-            # Initialize services
-            self.schematic_service = SchematicService(self.llm)
-            self.component_service = ComponentService()
-            self.bom_service = BOMService()
+            await self.container.initialize()
 
             # Initialize tool registry
             self.tool_registry = ToolRegistry(self)
@@ -615,7 +596,7 @@ Focus on understanding user intent and providing accurate technical assistance."
             messages.insert(0, system_msg)
 
         # Get LLM response with tools
-        agent = self.llm.bind_tools(self.tool_registry.get_tools_for_llm())
+        agent = self.container.get_agent_llm().bind_tools(self.tool_registry.get_tools_for_llm())
         response = await agent.ainvoke(messages)
 
         # Update state
@@ -640,7 +621,7 @@ Focus on understanding user intent and providing accurate technical assistance."
                         result.get('success') and
                         result.get('data', {}).get('components')):
                     components_data = result['data']['components']
-                    state.stored_components = components_data
+                    self.component_state.store_raw_analysis([ComponentData.from_dict(comp_data) for comp_data in components_data])
 
             new_state = state.model_copy()
             new_state.last_response = results[-1] if results else None
@@ -780,8 +761,7 @@ Focus on understanding user intent and providing accurate technical assistance."
 
     async def cleanup(self) -> None:
         """Cleanup resources"""
-        if self.silicon_expert_client:
-            await self.silicon_expert_client.close()
+        await self.container.cleanup()
 
     # =============================================================================
     # Dynamic Tool Management
@@ -836,7 +816,7 @@ class ComponentListTool(AgentTool):
 
     async def execute(self, resp_format: str = "table") -> AgentResponse:
         """List components in specified format"""
-        components = self.agent.stored_components
+        components = self.agent.component_state.get_components_for_bom()
 
         if not components:
             return AgentResponse(

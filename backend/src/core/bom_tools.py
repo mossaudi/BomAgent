@@ -126,40 +126,6 @@ Ready to help with your electronic designs! 🚀"""
             func=show_help
         )
 
-    def _create_analyze_tool(self) -> Tool:
-        """Simplified analyze tool without complex threading"""
-
-        def analyze_schematic(image_url: str) -> str:
-            # Validate URL format first
-            if not self._is_valid_url(image_url):
-                return """❌ **Invalid URL Format**
-
-    Please provide a valid HTTP/HTTPS URL to your schematic image.
-
-    **✅ Valid formats:**
-    • https://example.com/schematic.png
-    • http://mydomain.com/images/circuit.jpg
-
-    **❌ Invalid formats:**
-    • schematic.png (local file)
-    • /path/to/image.jpg (relative path)
-    • example.com/image.png (missing protocol)
-
-    **💡 Tips:**
-    - Upload to image hosting service (Imgur, etc.)
-    - Ensure image is publicly accessible
-    - Use direct links to image files"""
-
-            # Store the URL for async processing
-            self._pending_analysis_url = image_url
-            return f"🔍 Analysis queued for: {image_url}\n\n⏳ Processing will begin shortly..."
-
-        return Tool(
-            name="analyze_schematic",
-            description="Analyze circuit schematic from public URL. Input: valid HTTP/HTTPS image URL",
-            func=analyze_schematic
-        )
-
     # Add method to handle actual analysis in the agent
     async def _process_pending_analysis(self):
         """Handle pending analysis asynchronously"""
@@ -375,27 +341,6 @@ Ready to help with your electronic designs! 🚀"""
             func=show_table
         )
 
-    # Simplified async tools with proper error handling
-    def _create_search_component_tool(self) -> Tool:
-        def search_component(query: str) -> str:
-            try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(self._search_sync, query)
-                        return future.result(timeout=30)
-                except RuntimeError:
-                    return asyncio.run(self._search_async(query))
-            except Exception as e:
-                return f"❌ Search failed: {str(e)}"
-
-        return Tool(
-            name="search_component",
-            description="Search for component by name or part number",
-            func=search_component
-        )
-
     def _search_sync(self, query: str) -> str:
         """Run search in sync context"""
         new_loop = asyncio.new_event_loop()
@@ -429,25 +374,6 @@ Ready to help with your electronic designs! 🚀"""
         except Exception as e:
             return f"❌ Search failed: {str(e)}"
 
-    def _create_create_bom_tool(self) -> Tool:
-        def create_bom(params: str) -> str:
-            try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(self._create_bom_sync, params)
-                        return future.result(timeout=30)
-                except RuntimeError:
-                    return asyncio.run(self._create_bom_async(params))
-            except Exception as e:
-                return f"❌ BOM creation failed: {str(e)}"
-
-        return Tool(
-            name="create_bom",
-            description="Create new BOM. Format: 'name=BOM_NAME,project=PROJECT'",
-            func=create_bom
-        )
 
     def _create_bom_sync(self, params: str) -> str:
         """Create BOM in sync context"""

@@ -21,10 +21,10 @@ class LLMFactory:
         Uses Gemini 1.5 Flash with vision capabilities.
         """
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.0-flash",
             google_api_key=self.config.google_api_key,
             temperature=0.1,
-            max_output_tokens=8000,
+            max_output_tokens=30000,
             convert_system_message_to_human=True
         )
 
@@ -34,7 +34,7 @@ class LLMFactory:
         Uses Gemini 1.5 Flash optimized for structured output.
         """
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.0-flash",
             google_api_key=self.config.google_api_key,
             temperature=0.0,  # Zero temperature for consistent parsing
             max_output_tokens=1024,  # Limited output for better parsing
@@ -50,7 +50,7 @@ class LLMFactory:
         Same as agent but with even smaller output limit.
         """
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.0-flash",
             google_api_key=self.config.google_api_key,
             temperature=0.0,
             max_output_tokens=512,  # Very limited for fast responses

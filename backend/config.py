@@ -31,7 +31,7 @@ class AppConfig:
     """Simplified application configuration"""
     google_api_key: str
     silicon_expert: SiliconExpertConfig
-    llm_provider: str = "gemini"  # Options: "gemini", "openai", "anthropic", "ollama"
+    llm_provider: str = "anthropic"  # Options: "gemini", "openai", "anthropic", "ollama"
     debug: bool = False
     max_conversation_history: int = 50
     session_timeout_hours: int = 2
