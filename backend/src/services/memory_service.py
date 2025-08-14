@@ -44,7 +44,7 @@ class MemoryService:
 
     async def store_components(self, components: List[ComponentData]) -> None:
         """Thread-safe component storage."""
-        with self._lock:
+        async with self._lock:
             key = f"{self.session_id}:components"
             serialized_data = []
 
@@ -84,7 +84,7 @@ class MemoryService:
 
     async def store_analysis_result(self, result: Dict[str, Any]) -> None:
         """Thread-safe analysis result storage."""
-        with self._lock:
+        async with self._lock:
             key = f"{self.session_id}:analysis"
             self._storage[key] = result
             self._metadata[key] = {
@@ -94,7 +94,7 @@ class MemoryService:
 
     async def get_status(self) -> Dict[str, Any]:
         """Get memory status (no sensitive data exposed)."""
-        with self._lock:
+        async with self._lock:  # FIXED: Use async with instead of with
             session_keys = [k for k in self._storage.keys() if k.startswith(self.session_id)]
 
             components_key = f"{self.session_id}:components"
@@ -123,7 +123,7 @@ class MemoryService:
 
     async def cleanup(self) -> int:
         """Thread-safe cleanup of expired entries."""
-        with self._lock:
+        async with self._lock:
             expired_keys = []
             for key, metadata in self._metadata.items():
                 if self._is_expired(metadata.get("timestamp")):

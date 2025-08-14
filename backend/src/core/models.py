@@ -106,6 +106,7 @@ class ComponentData:
     confidence: float = 0.0
     enhanced: bool = False
     category: Optional[str] = None
+    quantity: int = 1
     metadata: Dict[str, Any] = None
 
     def __post_init__(self):

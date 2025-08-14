@@ -1,100 +1,101 @@
-# src/services/schematic_service.py
-"""Simplified schematic analysis service with no timeouts."""
+# src/services/schematic_service_fixed.py
+"""Fixed schematic analysis service with proper vision LLM integration."""
 
 import asyncio
 import json
 import re
 from typing import Dict, Any
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 class SchematicService:
-    """Simplified schematic analysis service."""
+    """Fixed schematic analysis service with proper vision integration."""
 
     def __init__(self, llm: ChatGoogleGenerativeAI):
         self.llm = llm
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert electronics engineer analyzing circuit schematics. 
-            Your task is to extract ALL visible components from the schematic image with maximum detail and accuracy.
+
+    async def analyze(self, image_url: str) -> Dict[str, Any]:
+        """Analyze schematic with proper vision LLM usage"""
+        try:
+            print(f"🔍 Starting schematic analysis for: {image_url}")
+
+            # Create the system prompt
+            system_content = """You are an expert electronics engineer analyzing circuit schematics. 
+            Your task is to extract ALL visible components from the schematic image, focusing ONLY on information that can actually be seen in the image.
 
             ANALYSIS REQUIREMENTS:
             - Identify EVERY visible component (resistors, capacitors, ICs, transistors, diodes, inductors, crystals, connectors, etc.)
-            - Extract component values, reference designators, and part numbers where visible
-            - Include component orientations and connections if relevant
-            - Look for small components that might be easily missed
-            - Identify integrated circuits by their package types and pin counts
-            - Note any text labels, part numbers, or manufacturer markings
-            - Include passive components even if values aren't clearly visible
+            - Extract ONLY the information that is clearly visible in the schematic
+            - Focus on component designators (R1, C2, U3, etc.) and values that are actually readable
+            - Don't guess or assume information that isn't clearly shown
+            - Include component descriptions only when helpful context is visible
 
             COMPONENT CATEGORIES TO IDENTIFY:
-            1. Resistors (R1, R2, etc.) - extract values in ohms/kohms/mohms
-            2. Capacitors (C1, C2, etc.) - extract values in pF/nF/uF/mF
-            3. Inductors/Coils (L1, L2, etc.) - extract values in nH/uH/mH/H
-            4. Integrated Circuits (U1, U2, IC1, etc.) - note package type, pin count
-            5. Transistors (Q1, Q2, T1, etc.) - identify type (NPN/PNP/MOSFET/etc.)
-            6. Diodes (D1, D2, etc.) - identify type (standard/LED/Zener/Schottky/etc.)
-            7. Crystals/Oscillators (Y1, X1, etc.) - extract frequency
-            8. Connectors (J1, P1, CN1, etc.) - note pin count and type
+            1. Resistors (R1, R2, etc.) - extract visible values (1k, 10k, 470, etc.)
+            2. Capacitors (C1, C2, etc.) - extract visible values (0.1uF, 10uF, 100pF, etc.)
+            3. Inductors/Coils (L1, L2, etc.) - extract visible values if shown
+            4. Integrated Circuits (U1, U2, IC1, etc.) - extract part numbers if visible
+            5. Transistors (Q1, Q2, T1, etc.) - note type only if clearly marked
+            6. Diodes (D1, D2, etc.) - identify type only if clearly shown (LED colors, etc.)
+            7. Crystals/Oscillators (Y1, X1, etc.) - extract frequency if visible
+            8. Connectors (J1, P1, CN1, etc.) - count pins if clearly countable
             9. Switches/Buttons (SW1, S1, etc.)
-            10. Test points, jumpers, and other components
+            10. Other components (fuses, test points, etc.)
 
-            RESPONSE FORMAT:
-            Return ONLY a valid JSON object with this exact structure:
+            RESPONSE FORMAT - ONLY include properties that are actually visible:
             {
               "components": [
                 {
                   "name": "Component Type (e.g., Resistor, Capacitor, IC)",
-                  "part_number": "Part number if visible (or null)",
-                  "manufacturer": "Manufacturer if visible (or null)",
-                  "description": "Detailed description including package type for ICs",
-                  "value": "Component value with units (e.g., 10k, 100uF, 16MHz)",
                   "designator": "Reference designator (e.g., R1, C2, U1)",
+                  "value": "Component value with units ONLY if visible (e.g., 10k, 100uF, 16MHz)",
+                  "part_number": "Part number ONLY if clearly readable",
+                  "description": "Brief description ONLY if helpful context is visible",
                   "confidence": 0.9,
-                  "category": "resistor|capacitor|inductor|ic|transistor|diode|crystal|connector|switch|other",
-                  "package": "Package type for ICs (e.g., DIP-8, SOIC-16, QFN-32)",
-                  "pins": "Pin count for ICs and connectors",
-                  "voltage_rating": "Voltage rating if visible",
-                  "tolerance": "Tolerance if visible (e.g., 5%, 1%)",
-                  "power_rating": "Power rating if visible (e.g., 0.25W, 1W)"
+                  "category": "resistor|capacitor|inductor|ic|transistor|diode|crystal|connector|switch|fuse|other"
                 }
               ],
               "total_components": 0,
-              "analysis_notes": "Any additional observations about the circuit"
+              "analysis_notes": "Brief observations about the circuit"
             }
 
-            QUALITY REQUIREMENTS:
-            - Set confidence scores based on clarity: 0.95+ for clearly visible, 0.8+ for mostly clear, 0.6+ for partially visible
-            - Include components even if you can only partially identify them
-            - For unclear values, provide best estimate with lower confidence
-            - Group similar components but list each instance separately
+            IMPORTANT RULES:
+            - DO NOT include properties that are not visible (no null values for part_number, description, etc.)
+            - DO NOT guess manufacturer, package type, voltage rating, tolerance, or power rating unless clearly shown
+            - DO NOT include pins count unless you can clearly count them
+            - Focus on what's actually readable in the image
+            - Set confidence scores realistically: 0.95+ for crystal clear, 0.85+ for clearly readable, 0.7+ for mostly clear
 
-            CRITICAL: Return ONLY the JSON object, no additional text, explanations, or formatting."""),
-            ("user", "Analyze this electronic schematic image and extract ALL visible components: {image_url}")
-        ])
+            CRITICAL: Return ONLY the JSON object with visible properties, no additional text."""
 
-    async def analyze(self, image_url: str) -> Dict[str, Any]:
-        """Analyze schematic with NO timeout limitations"""
-        try:
-            print(f"🔍 Starting schematic analysis for: {image_url}")
+            # Create message with image
+            message_content = [
+                {
+                    "type": "text",
+                    "text": f"{system_content}\n\nAnalyze this electronic schematic image and extract ALL visible components:"
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url}
+                }
+            ]
 
-            # Format the prompt with image URL
-            messages = self.prompt.format_messages(image_url=image_url)
+            # Create HumanMessage with proper content structure for vision
+            message = HumanMessage(content=message_content)
 
-            # Call LLM with NO timeout and large output limit
-            print("🤖 Calling Gemini for analysis...")
+            print("🤖 Calling Gemini Vision for analysis...")
+
+            # Call LLM with proper parameters for vision tasks
             response = await self.llm.ainvoke(
-                messages,
-                temperature=0.1,  # Low temperature for consistent extraction
-                max_output_tokens=50000,  # Increased output limit
-                # NO timeout parameter - let it take as long as needed
+                [message]
             )
 
             content = response.content.strip()
             print(f"📝 Received response ({len(content)} characters)")
 
-            # Extract JSON from response with improved regex
+            # Enhanced JSON extraction with better error handling
             json_match = re.search(r'\{.*\}', content, re.DOTALL | re.MULTILINE)
 
             if json_match:
@@ -110,9 +111,9 @@ class SchematicService:
                     # Update total count
                     result['total_components'] = len(result['components'])
 
-                    # Enhance component data
+                    # Enhance component data with proper defaults
                     for i, comp in enumerate(result['components']):
-                        # Ensure required fields exist
+                        # Ensure required fields exist with meaningful defaults
                         comp.setdefault('name', f'Unknown Component {i + 1}')
                         comp.setdefault('part_number', None)
                         comp.setdefault('manufacturer', None)
@@ -122,28 +123,106 @@ class SchematicService:
                         comp.setdefault('confidence', 0.5)
                         comp.setdefault('category', 'other')
 
+                        # New fields for better component data
+                        comp.setdefault('package', None)
+                        comp.setdefault('pins', None)
+                        comp.setdefault('voltage_rating', None)
+                        comp.setdefault('tolerance', None)
+                        comp.setdefault('power_rating', None)
+
                         # Ensure confidence is a float between 0 and 1
                         try:
                             comp['confidence'] = max(0.0, min(1.0, float(comp['confidence'])))
                         except (ValueError, TypeError):
                             comp['confidence'] = 0.5
 
+                        # Add metadata about extraction quality
+                        comp['extraction_quality'] = (
+                            'high' if comp['confidence'] > 0.8 else
+                            'medium' if comp['confidence'] > 0.5 else
+                            'low'
+                        )
+
+                    # Add analysis metadata
+                    result['analysis_metadata'] = {
+                        'image_url': image_url,
+                        'analysis_timestamp': asyncio.get_event_loop().time(),
+                        'llm_model': 'gemini-2.0-flash',
+                        'extraction_method': 'vision_llm'
+                    }
+
                     print(f"🎯 Analysis complete: {len(result['components'])} components found")
+
+                    # Log component summary for debugging
+                    if result['components']:
+                        print("📦 Found components:")
+                        for i, comp in enumerate(result['components'][:5], 1):  # Show first 5
+                            print(
+                                f"  {i}. {comp.get('name', 'Unknown')} ({comp.get('designator', 'N/A')}) - {comp.get('confidence', 0):.2f}")
+                        if len(result['components']) > 5:
+                            print(f"  ... and {len(result['components']) - 5} more")
+
                     return result
 
                 except json.JSONDecodeError as e:
                     print(f"❌ JSON parsing failed: {str(e)}")
-                    raise ValueError(f"Invalid JSON in LLM response: {str(e)}\nContent: {json_str[:500]}...")
+                    print(f"Raw content preview: {json_str[:200]}...")
+                    raise ValueError(f"Invalid JSON in LLM response: {str(e)}")
             else:
                 print(f"❌ No valid JSON found in response")
-                raise ValueError(f"No valid JSON found in LLM response. Content: {content[:500]}...")
+                print(f"Raw content preview: {content[:500]}...")
+
+                # Try to extract any component mentions even without JSON
+                component_patterns = [
+                    r'R\d+',  # Resistors
+                    r'C\d+',  # Capacitors
+                    r'U\d+',  # ICs
+                    r'IC\d+',  # ICs alternative
+                    r'Q\d+',  # Transistors
+                    r'D\d+',  # Diodes
+                    r'L\d+',  # Inductors
+                ]
+
+                found_designators = []
+                for pattern in component_patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    found_designators.extend(matches)
+
+                if found_designators:
+                    print(f"🔍 Found component references in text: {found_designators}")
+                    # Create minimal result with found designators
+                    fallback_components = []
+                    for designator in set(found_designators):  # Remove duplicates
+                        fallback_components.append({
+                            'name': f'Component {designator}',
+                            'designator': designator,
+                            'confidence': 0.3,
+                            'category': 'other',
+                            'description': 'Extracted from text analysis'
+                        })
+
+                    return {
+                        'components': fallback_components,
+                        'total_components': len(fallback_components),
+                        'analysis_notes': 'Fallback extraction from text patterns',
+                        'extraction_method': 'text_pattern_fallback'
+                    }
+
+                raise ValueError(f"No valid JSON or component patterns found in LLM response")
 
         except Exception as e:
             print(f"❌ Schematic analysis failed: {str(e)}")
-            raise Exception(f"Schematic analysis failed: {str(e)}")
+            # Return a more informative error response
+            return {
+                'components': [],
+                'total_components': 0,
+                'analysis_notes': f"Analysis failed: {str(e)}",
+                'error': str(e),
+                'extraction_method': 'failed'
+            }
 
     async def analyze_with_retry(self, image_url: str, max_retries: int = 3) -> Dict[str, Any]:
-        """Analyze schematic with retry logic and NO timeouts"""
+        """Enhanced retry logic with exponential backoff"""
         last_error = None
 
         for attempt in range(max_retries):
@@ -151,41 +230,43 @@ class SchematicService:
                 print(f"🔄 Analysis attempt {attempt + 1}/{max_retries}")
                 result = await self.analyze(image_url)
 
-                # Validate we got a reasonable number of components
+                # Check if we got meaningful results
                 component_count = len(result.get('components', []))
 
-                if component_count == 0:
-                    print("⚠️ No components found in analysis")
-                    if attempt < max_retries - 1:
-                        print("⏳ Retrying analysis...")
-                        await asyncio.sleep(2)  # Brief pause before retry
-                        continue
-                    else:
-                        # Return empty result on final attempt
-                        return {
-                            "components": [],
-                            "total_components": 0,
-                            "analysis_notes": "No components found in the schematic image"
-                        }
+                if component_count == 0 and result.get('error'):
+                    # If we have an error and no components, retry
+                    print(f"⚠️ Analysis failed with error: {result.get('error')}")
+                    last_error = result.get('error')
 
-                print(f"✅ Schematic analysis successful on attempt {attempt + 1}: {component_count} components found")
+                    if attempt < max_retries - 1:
+                        wait_time = min(2 ** attempt, 10)  # Exponential backoff, max 10s
+                        print(f"⏳ Retrying in {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+                        continue
+
+                # Success case or final attempt
+                if component_count > 0:
+                    print(f"✅ Analysis successful on attempt {attempt + 1}: {component_count} components found")
+                else:
+                    print(f"⚠️ Analysis complete but no components found on attempt {attempt + 1}")
+
                 return result
 
             except Exception as e:
-                last_error = e
+                last_error = str(e)
                 print(f"❌ Analysis attempt {attempt + 1} failed: {str(e)}")
 
                 if attempt < max_retries - 1:
-                    # Wait before retry with exponential backoff (but no timeout)
-                    wait_time = 2 ** attempt
+                    wait_time = min(2 ** attempt, 10)
                     print(f"⏳ Retrying in {wait_time} seconds...")
                     await asyncio.sleep(wait_time)
 
-        # If all retries failed, return a minimal result with error info
+        # All retries failed
         print(f"❌ All {max_retries} analysis attempts failed")
         return {
             "components": [],
             "total_components": 0,
             "analysis_notes": f"Analysis failed after {max_retries} attempts. Last error: {str(last_error)}",
-            "error": str(last_error)
+            "error": str(last_error),
+            "extraction_method": "failed_all_retries"
         }
