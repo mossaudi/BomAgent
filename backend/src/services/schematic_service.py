@@ -28,7 +28,7 @@ class SchematicService:
             ANALYSIS REQUIREMENTS:
             - Identify EVERY visible component (resistors, capacitors, ICs, transistors, diodes, inductors, crystals, connectors, etc.)
             - Extract ONLY the information that is clearly visible in the schematic
-            - Focus on component designators (R1, C2, U3, etc.) and values that are actually readable
+            - Focus on component values that are actually readable
             - Don't guess or assume information that isn't clearly shown
             - Include component descriptions only when helpful context is visible
 
@@ -52,7 +52,7 @@ class SchematicService:
                   "designator": "Reference designator (e.g., R1, C2, U1)",
                   "value": "Component value with units ONLY if visible (e.g., 10k, 100uF, 16MHz)",
                   "part_number": "Part number ONLY if clearly readable",
-                  "description": "Brief description ONLY if helpful context is visible",
+                  "description": "meaningful description",
                   "confidence": 0.9,
                   "category": "resistor|capacitor|inductor|ic|transistor|diode|crystal|connector|switch|fuse|other"
                 }
@@ -62,7 +62,7 @@ class SchematicService:
             }
 
             IMPORTANT RULES:
-            - DO NOT include properties that are not visible (no null values for part_number, description, etc.)
+            - DO NOT include properties that are not visible (no null values)
             - DO NOT guess manufacturer, package type, voltage rating, tolerance, or power rating unless clearly shown
             - DO NOT include pins count unless you can clearly count them
             - Focus on what's actually readable in the image
@@ -74,7 +74,7 @@ class SchematicService:
             message_content = [
                 {
                     "type": "text",
-                    "text": f"{system_content}\n\nAnalyze this electronic schematic image and extract ALL visible components:"
+                    "text": f"{system_content}\n\nAnalyze this electronic schematic image and extract ALL visible components with their clearly readable properties:"
                 },
                 {
                     "type": "image_url",
@@ -82,12 +82,10 @@ class SchematicService:
                 }
             ]
 
-            # Create HumanMessage with proper content structure for vision
             message = HumanMessage(content=message_content)
+            print("🤖 Calling Gemini Vision for optimized analysis...")
 
-            print("🤖 Calling Gemini Vision for analysis...")
-
-            # Call LLM with proper parameters for vision tasks
+            # Call LLM with optimized parameters
             response = await self.llm.ainvoke(
                 [message]
             )
@@ -156,9 +154,11 @@ class SchematicService:
                     # Log component summary for debugging
                     if result['components']:
                         print("📦 Found components:")
-                        for i, comp in enumerate(result['components'][:5], 1):  # Show first 5
+                        for i, comp in enumerate(result['components'][:5], 1):
+                            value_str = f" ({comp['value']})" if comp.get('value') else ""
+                            part_str = f" [{comp['part_number']}]" if comp.get('part_number') else ""
                             print(
-                                f"  {i}. {comp.get('name', 'Unknown')} ({comp.get('designator', 'N/A')}) - {comp.get('confidence', 0):.2f}")
+                                f"  {i}. {comp['designator']}: {comp['name']}{value_str}{part_str} - {comp['confidence']:.2f}")
                         if len(result['components']) > 5:
                             print(f"  ... and {len(result['components']) - 5} more")
 
@@ -171,44 +171,7 @@ class SchematicService:
             else:
                 print(f"❌ No valid JSON found in response")
                 print(f"Raw content preview: {content[:500]}...")
-
-                # Try to extract any component mentions even without JSON
-                component_patterns = [
-                    r'R\d+',  # Resistors
-                    r'C\d+',  # Capacitors
-                    r'U\d+',  # ICs
-                    r'IC\d+',  # ICs alternative
-                    r'Q\d+',  # Transistors
-                    r'D\d+',  # Diodes
-                    r'L\d+',  # Inductors
-                ]
-
-                found_designators = []
-                for pattern in component_patterns:
-                    matches = re.findall(pattern, content, re.IGNORECASE)
-                    found_designators.extend(matches)
-
-                if found_designators:
-                    print(f"🔍 Found component references in text: {found_designators}")
-                    # Create minimal result with found designators
-                    fallback_components = []
-                    for designator in set(found_designators):  # Remove duplicates
-                        fallback_components.append({
-                            'name': f'Component {designator}',
-                            'designator': designator,
-                            'confidence': 0.3,
-                            'category': 'other',
-                            'description': 'Extracted from text analysis'
-                        })
-
-                    return {
-                        'components': fallback_components,
-                        'total_components': len(fallback_components),
-                        'analysis_notes': 'Fallback extraction from text patterns',
-                        'extraction_method': 'text_pattern_fallback'
-                    }
-
-                raise ValueError(f"No valid JSON or component patterns found in LLM response")
+                raise ValueError("No valid JSON or component patterns found in LLM response")
 
         except Exception as e:
             print(f"❌ Schematic analysis failed: {str(e)}")

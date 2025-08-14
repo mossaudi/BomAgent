@@ -46,7 +46,8 @@ class ComponentService:
                         'name': comp_data.name,
                         'part_number': comp_data.part_number,
                         'manufacturer': comp_data.manufacturer,
-                        'description': comp_data.description
+                        'description': comp_data.description,
+                        'value': comp_data.value
                     }
                     base_component = comp_data
                 else:

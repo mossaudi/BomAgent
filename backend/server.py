@@ -66,7 +66,6 @@ class SessionManager:
     def __init__(self):
         self._agents: Dict[str, BOMAgent] = {}
         self._agent_locks: Dict[str, asyncio.Lock] = {}
-        self._shutdown_event = asyncio.Event()
         self._active_requests: Set[asyncio.Task] = set()
         self._main_lock = asyncio.Lock()
         self._config: Optional[AppConfig] = None
@@ -77,9 +76,6 @@ class SessionManager:
 
     async def get_agent(self, session_id: str) -> BOMAgent:
         """Get or create agent with lazy initialization"""
-        if self._shutdown_event.is_set():
-            raise HTTPException(status_code=503, detail="Service is shutting down")
-
         if not self._config:
             raise HTTPException(status_code=500, detail="Configuration not loaded")
 
@@ -119,8 +115,6 @@ class SessionManager:
 
     async def process_request_with_timeout(self, session_id: str, message: str) -> AgentResponse:
         """Process request with proper timeout and return structured response"""
-        if self._shutdown_event.is_set():
-            raise HTTPException(status_code=503, detail="Service is shutting down")
 
         agent = await self.get_agent(session_id)
 
@@ -130,7 +124,7 @@ class SessionManager:
 
         try:
             # Use appropriate timeout for complex requests
-            response = await asyncio.wait_for(request_task, timeout=300.0)  # 5 minutes
+            response = await asyncio.wait_for(request_task, timeout=600.0)  # 5 minutes
             return response
 
         except asyncio.TimeoutError:
@@ -171,7 +165,6 @@ class SessionManager:
     async def shutdown(self):
         """Proper shutdown sequence"""
         print("🔥 Starting shutdown sequence...")
-        self._shutdown_event.set()
 
         # Cancel all active requests
         if self._active_requests:
@@ -207,10 +200,6 @@ class SessionManager:
                 print("⚠️ Some session cleanups timed out")
             except Exception as e:
                 print(f"⚠️ Error during bulk cleanup: {e}")
-
-    def is_shutting_down(self) -> bool:
-        """Check if shutting down"""
-        return self._shutdown_event.is_set()
 
 
 # Global session manager
@@ -284,8 +273,6 @@ app.add_middleware(
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
     """Main chat endpoint - returns structured data for UI consumption"""
-    if session_manager.is_shutting_down():
-        raise HTTPException(status_code=503, detail="Service is shutting down")
 
     try:
         # Get session ID
@@ -324,8 +311,6 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 @app.get("/api/history/{session_id}", response_model=HistoryResponse)
 async def get_history(session_id: str):
     """Get conversation history"""
-    if session_manager.is_shutting_down():
-        raise HTTPException(status_code=503, detail="Service is shutting down")
 
     try:
         if session_id in session_manager._agents:
@@ -347,8 +332,6 @@ async def get_history(session_id: str):
 @app.delete("/api/history/{session_id}")
 async def clear_history(session_id: str):
     """Clear conversation history"""
-    if session_manager.is_shutting_down():
-        raise HTTPException(status_code=503, detail="Service is shutting down")
 
     try:
         if session_id in session_manager._agents:
@@ -368,8 +351,6 @@ async def clear_history(session_id: str):
 @app.get("/api/sessions/{session_id}", response_model=SessionInfoResponse)
 async def get_session_info(session_id: str):
     """Get session information"""
-    if session_manager.is_shutting_down():
-        raise HTTPException(status_code=503, detail="Service is shutting down")
 
     try:
         if session_id in session_manager._agents:
@@ -406,13 +387,6 @@ async def cleanup_session(session_id: str):
 @app.get("/api/sessions")
 async def list_sessions():
     """List all active sessions"""
-    if session_manager.is_shutting_down():
-        return {
-            "active_sessions": [],
-            "total_count": 0,
-            "timestamp": datetime.now().isoformat(),
-            "status": "shutting_down"
-        }
 
     try:
         active_sessions = session_manager.get_active_sessions()
@@ -433,12 +407,9 @@ async def health_check():
     try:
         active_sessions = len(session_manager.get_active_sessions())
         active_requests = len(session_manager._active_requests)
-        is_shutting_down = session_manager.is_shutting_down()
 
         status = "healthy"
-        if is_shutting_down:
-            status = "shutting_down"
-        elif active_requests > 10:
+        if active_requests > 10:
             status = "busy"
 
         return {
@@ -464,8 +435,6 @@ async def health_check():
 @app.get("/api/components/{session_id}")
 async def get_components(session_id: str):
     """Get stored components in structured format for UI tables"""
-    if session_manager.is_shutting_down():
-        raise HTTPException(status_code=503, detail="Service is shutting down")
 
     try:
         if session_id in session_manager._agents:

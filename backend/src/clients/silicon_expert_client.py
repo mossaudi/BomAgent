@@ -100,7 +100,7 @@ class SiliconExpertClient:
 
                 # Build search query
                 search_parts = []
-                for field in ['part_number', 'manufacturer', 'description', 'name']:
+                for field in ['part_number', 'manufacturer', 'description', 'name', 'value']:
                     value = component_data.get(field)
                     if value and isinstance(value, str) and len(value.strip()) > 0:
                         search_parts.append(value.strip())

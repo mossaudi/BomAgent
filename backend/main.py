@@ -621,14 +621,29 @@ Focus on understanding user intent and providing accurate technical assistance."
                         result.get('success') and
                         result.get('data', {}).get('components')):
                     components_data = result['data']['components']
-                    self.component_state.store_raw_analysis([ComponentData.from_dict(comp_data) for comp_data in components_data])
+                    self.component_state.store_raw_analysis(
+                        [ComponentData.from_dict(comp_data) for comp_data in components_data])
 
             new_state = state.model_copy()
             new_state.last_response = results[-1] if results else None
 
             # Add tool results to messages
             for result in results:
-                new_state.messages.append(AIMessage(content=json.dumps(result, indent=2)))
+                # Create a summary message instead of dumping all data
+                if result.get('success'):
+                    if result.get('action') == 'analyze_schematic':
+                        # For schematic analysis, just summarize
+                        component_count = len(result.get('data', {}).get('components', []))
+                        enhanced_count = result.get('data', {}).get('enhanced_count', 0)
+                        summary_message = f"✅ Schematic analysis completed successfully. Found {component_count} components, enhanced {enhanced_count} with Silicon Expert data."
+                    else:
+                        # For other tools, use the message field
+                        summary_message = result.get('message', 'Tool executed successfully')
+                else:
+                    summary_message = f"❌ Tool execution failed: {result.get('error', 'Unknown error')}"
+
+                # Add concise summary instead of full data
+                new_state.messages.append(AIMessage(content=summary_message))
 
             return new_state
 
@@ -687,12 +702,9 @@ Focus on understanding user intent and providing accurate technical assistance."
             config = {"configurable": {"thread_id": self.session_id}}
             final_state = await self.graph.ainvoke(initial_state, config)
 
-            # Update stored components
-            if final_state.get('stored_components'):
-                self._stored_components = [
-                    ComponentData.from_dict(comp_data)
-                    for comp_data in final_state['stored_components']
-                ]
+            # Update stored components from component_state manager
+            stored_components = self.component_state.get_components_for_bom()
+            self._stored_components = stored_components
 
             # Add to conversation history
             self.conversation_history.append({
@@ -704,38 +716,61 @@ Focus on understanding user intent and providing accurate technical assistance."
             # Extract and return final response
             if final_state.get('last_response'):
                 response_data = final_state['last_response']
+
+                # Store in conversation history
                 self.conversation_history.append({
                     "type": "assistant",
                     "content": response_data,
                     "timestamp": datetime.now().isoformat()
                 })
 
+                # Return the structured response
                 return AgentResponse(**response_data)
             else:
-                # Generate helpful response based on last message
+                # Handle case where no tool was executed
+                # Look for the last AI message
                 last_ai_message = None
-                for msg in reversed(final_state.get('messages') or []):
+                for msg in reversed(final_state.get('messages', [])):
                     if isinstance(msg, AIMessage):
                         last_ai_message = msg
                         break
 
-                response_message = "I'm here to help with electronic design and BOM management."
-                if last_ai_message and hasattr(last_ai_message, 'content'):
-                    response_message = last_ai_message.content[:500]  # Limit length
+                if last_ai_message:
+                    response_message = last_ai_message.content
+                else:
+                    response_message = "I'm here to help with electronic design and BOM management. You can ask me to analyze schematics, search for components, or manage BOMs."
 
-                return AgentResponse(
+                # Create a general response
+                response = AgentResponse(
                     success=True,
                     action="general_response",
                     message=response_message
                 )
 
+                self.conversation_history.append({
+                    "type": "assistant",
+                    "content": response.to_dict(),
+                    "timestamp": datetime.now().isoformat()
+                })
+
+                return response
+
         except Exception as e:
-            return AgentResponse(
+            print(f"❌ Request processing error: {str(e)}")
+            error_response = AgentResponse(
                 success=False,
                 action="error",
                 error=str(e),
                 message=f"Request processing failed: {str(e)}"
             )
+
+            self.conversation_history.append({
+                "type": "assistant",
+                "content": error_response.to_dict(),
+                "timestamp": datetime.now().isoformat()
+            })
+
+            return error_response
 
     async def get_stored_components(self) -> List[ComponentData]:
         """Get stored components"""
