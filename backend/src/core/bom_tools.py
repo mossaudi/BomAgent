@@ -10,12 +10,12 @@ Fixed issues:
 
 import asyncio
 from typing import Dict, Any, List
-from urllib.parse import urlparse
 
-from langchain.agents import Tool
-from src.clients.silicon_expert_client import SearchResult
+from agents import Tool
+
 from src.core.container import Container
-from src.core.models import ComponentData, ResponseType, AgentResponse
+from src.core.models import ComponentData
+from src.core.utils import handle_api_call, convert_components_to_api_format
 
 
 class ComponentStateManager:
@@ -89,36 +89,36 @@ class BOMTools:
         def show_help(_: str = "") -> str:
             return """🔧 **BOM Agent - Electronic Design Assistant**
 
-**📋 Available Commands:**
-
-**1. Schematic Analysis:**
-   Format: `analyze_schematic(https://your-image-url.com/schematic.jpg)`
-   - Extracts ALL components from circuit schematics
-   - Auto-enhances with Silicon Expert data
-   - Supports PNG, JPG, JPEG formats
-   - Requires publicly accessible URL
-
-**2. Component Management:**
-   • `show_components_table()` - View analyzed components
-   • `search_component(part_name)` - Find specific components
-
-**3. BOM Operations:**
-   • `create_bom(name=MyBOM,project=Arduino)` - Create new BOM
-   • `add_components_to_bom(BOM_name)` - Add stored components
-   • `list_boms()` - Show existing BOMs
-
-**🎯 Typical Workflow:**
-1. Analyze schematic with public URL
-2. Review components in table format
-3. Create BOM for your project
-4. Add all components to BOM
-
-**💡 Important:**
-- Schematic images must be publicly accessible
-- Analysis only starts when you provide a valid URL
-- All components are stored in memory for BOM operations
-
-Ready to help with your electronic designs! 🚀"""
+                    **📋 Available Commands:**
+                    
+                    **1. Schematic Analysis:**
+                       Format: `analyze_schematic(https://your-image-url.com/schematic.jpg)`
+                       - Extracts ALL components from circuit schematics
+                       - Auto-enhances with Silicon Expert data
+                       - Supports PNG, JPG, JPEG formats
+                       - Requires publicly accessible URL
+                    
+                    **2. Component Management:**
+                       • `show_components_table()` - View analyzed components
+                       • `search_component(part_name)` - Find specific components
+                    
+                    **3. BOM Operations:**
+                       • `create_bom(name=MyBOM,project=Arduino)` - Create new BOM
+                       • `add_components_to_bom(BOM_name)` - Add stored components
+                       • `list_boms()` - Show existing BOMs
+                    
+                    **🎯 Typical Workflow:**
+                    1. Analyze schematic with public URL
+                    2. Review components in table format
+                    3. Create BOM for your project
+                    4. Add all components to BOM
+                    
+                    **💡 Important:**
+                    - Schematic images must be publicly accessible
+                    - Analysis only starts when you provide a valid URL
+                    - All components are stored in memory for BOM operations
+                    
+                    Ready to help with your electronic designs! 🚀"""
 
         return Tool(
             name="help",
@@ -165,18 +165,6 @@ Ready to help with your electronic designs! 🚀"""
                 return f"❌ Analysis failed: {str(e)}"
 
         return None
-
-    def _is_valid_url(self, url: str) -> bool:
-        """Validate URL format"""
-        try:
-            result = urlparse(url)
-            return all([
-                result.scheme in ['http', 'https'],
-                result.netloc,
-                result.path
-            ])
-        except:
-            return False
 
     def _run_analysis_sync(self, image_url: str) -> str:
         """Run analysis in sync context"""
@@ -418,18 +406,7 @@ Ready to help with your electronic designs! 🚀"""
 
     def _create_add_components_tool(self) -> Tool:
         def add_components(bom_name: str) -> str:
-            try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(self._add_components_sync, bom_name)
-                        return future.result(timeout=30)
-                except RuntimeError:
-                    return asyncio.run(self._add_components_async(bom_name))
-            except Exception as e:
-                return f"❌ Add components failed: {str(e)}"
-
+            return asyncio.run(self._add_components_async(bom_name))
         return Tool(
             name="add_components_to_bom",
             description="Add all stored components to existing BOM",
@@ -449,40 +426,22 @@ Ready to help with your electronic designs! 🚀"""
     async def _add_components_async(self, bom_name: str) -> str:
         """Async add components implementation"""
         components = self.component_state.get_components_for_bom()
-
         if not components:
             return "⚠️ No components available. Analyze a schematic first."
-
-        try:
-            # Convert to API format
-            parts_data = []
-            for comp in components:
-                part = {
-                    "part_number": comp.part_number or comp.designator or "Unknown",
-                    "manufacturer": comp.manufacturer or "Unknown",
-                    "description": f"{comp.name} - {comp.description or comp.value or ''}".strip(" - "),
-                    "quantity": str(comp.quantity),
-                    "designator": comp.designator or ""
-                }
-                parts_data.append(part)
-
-            bom_service = self.container.services.bom
-            result = await bom_service.add_parts(bom_name.strip(), "", parts_data)
-
-            if result.get('success'):
-                summary = self.component_state.get_enhancement_summary()
-                return f"""✅ **Components Added to {bom_name}!**
-
-📦 **Total Parts:** {len(components)}
-✅ **Enhanced:** {summary['enhanced_count']}
-📋 **Original:** {summary['failed_count']}
-
-🎯 BOM '{bom_name}' now contains all your analyzed components!"""
-            else:
-                return f"❌ Failed to add components: {result.get('error', 'Unknown error')}"
-
-        except Exception as e:
-            return f"❌ Add components failed: {str(e)}"
+        parts_data = convert_components_to_api_format(components)
+        bom_service = self.container.services.bom
+        result = await handle_api_call(bom_service.add_parts, bom_name.strip(), "", parts_data)
+        if result.get('success'):
+            summary = self.component_state.get_enhancement_summary()
+            return f"""✅ **Components Added to {bom_name}!**
+                        
+                        📦 **Total Parts:** {len(components)}
+                        ✅ **Enhanced:** {summary['enhanced_count']}
+                        📋 **Original:** {summary['failed_count']}
+                        
+                        🎯 BOM '{bom_name}' now contains all your analyzed components!"""
+        else:
+            return f"❌ Failed to add components: {result.get('error', 'Unknown error')}"
 
     def _create_list_boms_tool(self) -> Tool:
         def list_boms(project_filter: str = "") -> str:

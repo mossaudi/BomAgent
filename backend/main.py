@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Literal
 from urllib.parse import urlparse
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
@@ -128,14 +128,6 @@ class SchematicAnalysisTool(AgentTool):
 
     async def execute(self, image_url: str) -> AgentResponse:
         """Execute schematic analysis with proper parameter handling"""
-        # Validate URL
-        if not self._is_valid_url(image_url):
-            return AgentResponse(
-                success=False,
-                action=self.name,
-                error="Invalid URL format. Must be http:// or https://",
-                message="Please provide a valid HTTP/HTTPS URL to your schematic image."
-            )
 
         try:
             # Analyze schematic
@@ -194,14 +186,6 @@ class SchematicAnalysisTool(AgentTool):
                 error=str(e),
                 message=f"Schematic analysis failed: {str(e)}"
             )
-
-    def _is_valid_url(self, url: str) -> bool:
-        """Validate URL format"""
-        try:
-            result = urlparse(url)
-            return all([result.scheme in ['http', 'https'], result.netloc, result.path])
-        except:
-            return False
 
 
 class ComponentSearchTool(AgentTool):
@@ -610,26 +594,14 @@ Focus on understanding user intent and providing accurate technical assistance."
         last_message = state.messages[-1]
 
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            results = []
-
-            for tool_call in last_message.tool_calls:
-                result = await self._execute_tool_call(tool_call)
-                results.append(result)
-
-                # Update stored components if this was a schematic analysis
-                if (tool_call['name'] == 'analyze_schematic' and
-                        result.get('success') and
-                        result.get('data', {}).get('components')):
-                    components_data = result['data']['components']
-                    self.component_state.store_raw_analysis(
-                        [ComponentData.from_dict(comp_data) for comp_data in components_data])
+            tasks = [self._execute_tool_call(tc) for tc in last_message.tool_calls]
+            results = await asyncio.gather(*tasks)
 
             new_state = state.model_copy()
             new_state.last_response = results[-1] if results else None
 
             # Add tool results to messages
             for result in results:
-                # Create a summary message instead of dumping all data
                 if result.get('success'):
                     if result.get('action') == 'analyze_schematic':
                         # For schematic analysis, just summarize

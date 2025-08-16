@@ -437,29 +437,18 @@ async def get_components(session_id: str):
     """Get stored components in structured format for UI tables"""
 
     try:
-        if session_id in session_manager._agents:
-            agent = session_manager._agents[session_id]
-            components = await agent.get_stored_components()
-
-            # Return structured data for UI consumption
-            return {
-                "success": True,
-                "session_id": session_id,
-                "components": [comp.to_dict() for comp in components],
-                "total_count": len(components),
-                "enhanced_count": sum(1 for comp in components if comp.enhanced),
-                "timestamp": datetime.now().isoformat()
-            }
-        else:
-            return {
-                "success": True,
-                "session_id": session_id,
-                "components": [],
-                "total_count": 0,
-                "enhanced_count": 0,
-                "timestamp": datetime.now().isoformat()
-            }
-
+        agent = await session_manager.get_agent(session_id)
+        components = await agent.get_stored_components()
+        return {
+            "success": True,
+            "session_id": session_id,
+            "components": [comp.to_dict() for comp in components],
+            "total_count": len(components),
+            "enhanced_count": sum(1 for comp in components if comp.enhanced),
+            "timestamp": datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Components endpoint error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
