@@ -11,8 +11,7 @@ Fixed issues:
 import asyncio
 from typing import Dict, Any, List
 
-from agents import Tool
-
+from langchain_core.tools import Tool
 from src.core.container import Container
 from src.core.models import ComponentData
 from src.core.utils import handle_api_call, convert_components_to_api_format
